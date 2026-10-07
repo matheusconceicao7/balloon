@@ -18,6 +18,7 @@ const state = {
   page: 0,          // zero-based page index
   zoom: 1.3,
   selected: null,   // item id
+  busy: false,     // serialize drawing edits so stale responses cannot restore deletions
 };
 
 // ---------------------------------------------------------------- extraction
@@ -76,69 +77,80 @@ async function extractPage(page, index) {
 // ------------------------------------------------------------------- loading
 
 async function loadPDF(file) {
-  toast(`Reading ${file.name}…`);
-  const buf = await file.arrayBuffer();
-  state.pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  if (state.busy) return;
+  setDrawingBusy(true);
+  try {
+    toast(`Reading ${file.name}…`);
+    const buf = await file.arrayBuffer();
+    state.pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
-  const pages = [];
-  let texts = [];
-  for (let n = 1; n <= state.pdf.numPages; n++) {
-    const page = await state.pdf.getPage(n);
-    const { runs, width, height } = await extractPage(page, n - 1);
-    pages.push({ index: n - 1, width, height });
-    texts = texts.concat(runs);
+    const pages = [];
+    let texts = [];
+    for (let n = 1; n <= state.pdf.numPages; n++) {
+      const page = await state.pdf.getPage(n);
+      const { runs, width, height } = await extractPage(page, n - 1);
+      pages.push({ index: n - 1, width, height });
+      texts = texts.concat(runs);
+    }
+
+    state.texts = texts;
+    state.page = 0;
+    state.selected = null;
+
+    const guessed = file.name.replace(/\.pdf$/i, '');
+    if (!$('partNumber').value) $('partNumber').value = guessed;
+
+    await build({
+      id: 'local',
+      name: $('partName').value,
+      part_number: $('partNumber').value || guessed,
+      revision: $('revision').value,
+      pages,
+    });
+
+    await renderPage();
+    toast(`${state.drawing.items.length} characteristics found`);
+  } finally {
+    setDrawingBusy(false);
   }
-
-  state.texts = texts;
-  state.page = 0;
-
-  const guessed = file.name.replace(/\.pdf$/i, '');
-  if (!$('partNumber').value) $('partNumber').value = guessed;
-
-  await build({
-    id: 'local',
-    name: $('partName').value,
-    part_number: $('partNumber').value || guessed,
-    revision: $('revision').value,
-    pages,
-  });
-
-  await renderPage();
-  toast(`${state.drawing.items.length} characteristics found`);
 }
 
 async function loadDemo() {
-  const res = await fetch('/api/demo');
-  if (!res.ok) return toast('Could not load the demo', true);
-  const { drawing, texts } = await res.json();
+  if (state.busy) return;
+  setDrawingBusy(true);
+  try {
+    const res = await fetch('/api/demo');
+    if (!res.ok) return toast('Could not load the demo', true);
+    const { drawing, texts } = await res.json();
 
-  state.pdf = null;
-  state.texts = texts;
-  state.page = 0;
-  state.drawing = drawing;
+    state.pdf = null;
+    state.texts = texts;
+    state.page = 0;
+    state.selected = null;
+    state.drawing = drawing;
 
-  $('partNumber').value = drawing.part_number || '';
-  $('partName').value = drawing.name || '';
-  $('revision').value = drawing.revision || '';
+    $('partNumber').value = drawing.part_number || '';
+    $('partName').value = drawing.name || '';
+    $('revision').value = drawing.revision || '';
 
-  await renderPage();
-  toast(`Demo part loaded — ${drawing.items.length} characteristics`);
+    await renderPage();
+    toast(`Demo part loaded — ${drawing.items.length} characteristics`);
+  } finally {
+    setDrawingBusy(false);
+  }
 }
 
 async function build(meta) {
   const body = {
     drawing: meta,
     texts: state.texts,
-    tolerances: {
-      1: num($('tol1').value, 0.2),
-      2: num($('tol2').value, 0.1),
-      3: num($('tol3').value, 0.05),
-    },
-    angular: num($('tolAng').value, 0.5),
-    unit: 'mm',
+    ...parserOptions(),
   };
   const res = await post('/api/build', body);
-  if (res) state.drawing = res;
+  if (res) {
+    state.drawing = res;
+    state.selected = null;
+  }
 }
 
 // ------------------------------------------------------------------ rendering
@@ -273,7 +285,7 @@ function drawTable() {
     const num = cell('td', item.number, 'c num');
 
     const req = cell('td', item.requirement, 'req editable');
-    req.contentEditable = 'true';
+    req.contentEditable = String(!state.busy);
     req.spellcheck = false;
     req.title = `as extracted: ${item.source.text}`;
     req.addEventListener('blur', () => reparse(item.id, req.textContent.trim()));
@@ -287,6 +299,7 @@ function drawTable() {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = item.include;
+    box.disabled = state.busy;
     box.title = 'Include on the inspection report';
     box.addEventListener('change', () => {
       item.include = box.checked;
@@ -318,6 +331,7 @@ function updateChrome(d) {
   const total = d.items.length;
   const inspectable = d.items.filter((i) => i.include).length;
   $('count').textContent = `${inspectable} of ${total} inspectable`;
+  updateDeleteButton();
 
   const warnings = [];
   for (const it of d.items) {
@@ -336,14 +350,15 @@ function updateChrome(d) {
   const pager = document.querySelector('.pager');
   pager.hidden = d.pages.length < 2;
   $('pageLabel').textContent = `${state.page + 1} / ${d.pages.length}`;
-  $('prev').disabled = state.page === 0;
-  $('next').disabled = state.page >= d.pages.length - 1;
+  $('prev').disabled = state.busy || state.page === 0;
+  $('next').disabled = state.busy || state.page >= d.pages.length - 1;
 }
 
 // ----------------------------------------------------------------- selection
 
 function select(id) {
   state.selected = id;
+  updateDeleteButton();
   for (const el of document.querySelectorAll('.balloon')) {
     el.classList.toggle('selected', el.dataset.id === id);
   }
@@ -352,6 +367,25 @@ function select(id) {
     tr.classList.toggle('selected', on);
     if (on) tr.scrollIntoView({ block: 'nearest' });
   }
+}
+
+function updateDeleteButton() {
+  const item = findItem(state.selected);
+  $('deleteBalloon').disabled = state.busy || !item || item.page !== state.page;
+  $('undoDelete').disabled = state.busy || !(state.drawing?.deleted?.length);
+}
+
+function setDrawingBusy(busy) {
+  state.busy = busy;
+  for (const id of ['tidy', 'reparse', 'exportSvg', 'exportXlsx', 'file',
+                    'loadDemo', 'prev', 'next', 'zoomIn', 'zoomOut',
+                    'tol1', 'tol2', 'tol3', 'tolAng']) {
+    $(id).disabled = busy;
+  }
+  for (const el of document.querySelectorAll('#tbody .req')) el.contentEditable = String(!busy);
+  for (const el of document.querySelectorAll('#tbody input')) el.disabled = busy;
+  if (state.drawing) updateChrome(state.drawing);
+  else updateDeleteButton();
 }
 
 // ------------------------------------------------------------------ dragging
@@ -365,6 +399,7 @@ function installDrag() {
   let drag = null;
 
   overlay.addEventListener('pointerdown', (e) => {
+    if (state.busy) return;
     const g = e.target.closest('.balloon');
     if (!g) return;
     const item = findItem(g.dataset.id);
@@ -379,6 +414,12 @@ function installDrag() {
 
   overlay.addEventListener('pointermove', (e) => {
     if (!drag) return;
+    // Deletion or re-reading may have removed the item during this drag.
+    if (state.busy || findItem(drag.item.id) !== drag.item) {
+      try { overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+      drag = null;
+      return;
+    }
     const p = toSVG(e);
     drag.item.balloon.c.x = p.x + drag.dx;
     drag.item.balloon.c.y = p.y + drag.dy;
@@ -425,12 +466,59 @@ function leaderFor(box, circle) {
 
 // -------------------------------------------------------------------- actions
 
-async function reparse(id, text) {
-  const item = findItem(id);
-  if (!item || !text || text === item.requirement) return;
+// Drawing edits go through the Go model. The complete deletion history travels
+// with the drawing, so layout, rebuild and undo share the same rules.
+async function applyDrawingAction(path, extra, onSuccess) {
+  const drawing = state.drawing;
+  if (!drawing || state.busy) return false;
+  const page = state.page;
+  setDrawingBusy(true);
+  try {
+    const res = await post(path, { drawing, ...extra });
+    if (!res || state.drawing !== drawing) return false;
+    state.drawing = res;
+    // Metadata fields can be edited while the local request is in flight.
+    // Keep their current values rather than the older request snapshot.
+    syncMeta();
+    state.selected = null;
+    onSuccess?.(res);
+    if (page !== state.page) {
+      await renderPage();
+    } else {
+      drawOverlay(currentPage());
+      drawTable();
+      updateChrome(res);
+    }
+    return true;
+  } finally {
+    setDrawingBusy(false);
+  }
+}
 
-  const res = await post('/api/parse', {
-    text,
+async function deleteSelectedBalloon() {
+  const item = findItem(state.selected);
+  if (!item || item.page !== state.page) return;
+  await applyDrawingAction('/api/delete', { id: item.id }, () => {
+    toast(`Balloon #${item.number} deleted — remaining balloons renumbered`);
+  });
+}
+
+async function undoDeletion() {
+  const deleted = state.drawing?.deleted || [];
+  const item = deleted[deleted.length - 1];
+  if (!item) return;
+  await applyDrawingAction('/api/undo-delete', {}, (drawing) => {
+    const restored = drawing.items.find(candidate => candidate.id === item.id);
+    if (restored) {
+      state.page = restored.page;
+      state.selected = restored.id;
+      toast(`Balloon #${restored.number} restored`);
+    }
+  });
+}
+
+function parserOptions() {
+  return {
     tolerances: {
       1: num($('tol1').value, 0.2),
       2: num($('tol2').value, 0.1),
@@ -438,30 +526,32 @@ async function reparse(id, text) {
     },
     angular: num($('tolAng').value, 0.5),
     unit: 'mm',
-  });
-  if (!res) return;
+  };
+}
 
-  item.characteristic = res.characteristic;
-  item.requirement = res.requirement;
-  item.limits = res.limits;
-  item.designator = res.designator;
-  item.include = res.inspectable;
-
-  drawTable();
-  drawOverlay(currentPage());
-  updateChrome(state.drawing);
-  toast(`#${item.number} re-read as ${res.requirement}`);
+async function reparse(id, text) {
+  const item = findItem(id);
+  if (state.busy || !item || !text || text === item.requirement) return;
+  setDrawingBusy(true);
+  try {
+    const res = await post('/api/parse', { text, ...parserOptions() });
+    if (!res || findItem(id) !== item) return;
+    item.characteristic = res.characteristic;
+    item.requirement = res.requirement;
+    item.limits = res.limits;
+    item.designator = res.designator;
+    item.include = res.inspectable;
+    drawTable();
+    drawOverlay(currentPage());
+    updateChrome(state.drawing);
+    toast(`#${item.number} re-read as ${res.requirement}`);
+  } finally {
+    setDrawingBusy(false);
+  }
 }
 
 async function tidy() {
-  if (!state.drawing) return;
-  const res = await post('/api/layout', { drawing: state.drawing, page: state.page });
-  if (!res) return;
-  state.drawing = res;
-  drawOverlay(currentPage());
-  drawTable();
-  updateChrome(state.drawing);
-  toast('Balloons re-placed');
+  await applyDrawingAction('/api/layout', { page: state.page }, () => toast('Balloons re-placed'));
 }
 
 async function download(path, fallbackName) {
@@ -575,21 +665,17 @@ function init() {
   $('zoomIn').addEventListener('click', () => { state.zoom = Math.min(4, state.zoom * 1.25); renderPage(); });
   $('zoomOut').addEventListener('click', () => { state.zoom = Math.max(0.3, state.zoom / 1.25); renderPage(); });
   $('tidy').addEventListener('click', tidy);
+  $('deleteBalloon').addEventListener('click', deleteSelectedBalloon);
+  $('undoDelete').addEventListener('click', undoDeletion);
   $('exportXlsx').addEventListener('click', () => download('/api/export.xlsx', 'inspection.xlsx'));
   $('exportSvg').addEventListener('click', () => download('/api/export.svg', 'drawing.svg'));
 
   $('reparse').addEventListener('click', async () => {
     if (!state.drawing) return toast('Open a drawing first', true);
     syncMeta();
-    await build({
-      id: state.drawing.id,
-      name: state.drawing.name,
-      part_number: state.drawing.part_number,
-      revision: state.drawing.revision,
-      pages: state.drawing.pages.map((p) => ({ index: p.index, width: p.width, height: p.height })),
+    await applyDrawingAction('/api/build', { texts: state.texts, ...parserOptions() }, () => {
+      toast('Drawing re-read with the new defaults');
     });
-    await renderPage();
-    toast('Drawing re-read with the new defaults');
   });
 
   for (const id of ['partNumber', 'partName', 'revision']) {
@@ -597,7 +683,23 @@ function init() {
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.target.isContentEditable || e.target.tagName === 'INPUT') return;
+    if (e.target.isContentEditable || e.target.closest('input, textarea, select')) return;
+    if (state.busy) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.repeat &&
+        e.key.toLowerCase() === 'z' && state.drawing?.deleted?.length) {
+      e.preventDefault();
+      undoDeletion();
+      return;
+    }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat &&
+        (e.key === 'Delete' || e.key === 'Backspace')) {
+      const item = findItem(state.selected);
+      if (item && item.page === state.page) {
+        e.preventDefault();
+        deleteSelectedBalloon();
+      }
+      return;
+    }
     if (e.key === 'ArrowRight' && !$('next').disabled) { state.page++; renderPage(); }
     if (e.key === 'ArrowLeft' && !$('prev').disabled) { state.page--; renderPage(); }
   });

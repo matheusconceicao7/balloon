@@ -40,6 +40,8 @@ func New(assets fs.FS) *Server {
 	s.mux.HandleFunc("POST /api/build", s.handleBuild)
 	s.mux.HandleFunc("POST /api/parse", s.handleParse)
 	s.mux.HandleFunc("POST /api/layout", s.handleLayout)
+	s.mux.HandleFunc("POST /api/delete", s.handleDelete)
+	s.mux.HandleFunc("POST /api/undo-delete", s.handleUndoDelete)
 	s.mux.HandleFunc("POST /api/export.xlsx", s.handleExportXLSX)
 	s.mux.HandleFunc("POST /api/export.svg", s.handleExportSVG)
 	s.mux.Handle("/", http.FileServer(http.FS(assets)))
@@ -83,7 +85,18 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	// is just as unreadable. The browser already has these boxes, so this costs
 	// nothing to honour.
 	for i := range d.Pages {
-		d.Pages[i].Obstacles = append(d.Pages[i].Obstacles, textObstacles(req.Texts, d.Pages[i].Index)...)
+		// A re-read posts the existing drawing, whose obstacles already include
+		// the text layer. Add missing boxes without accumulating duplicates.
+		seen := make(map[layout.Rect]bool, len(d.Pages[i].Obstacles))
+		for _, box := range d.Pages[i].Obstacles {
+			seen[box] = true
+		}
+		for _, box := range textObstacles(req.Texts, d.Pages[i].Index) {
+			if !seen[box] {
+				d.Pages[i].Obstacles = append(d.Pages[i].Obstacles, box)
+				seen[box] = true
+			}
+		}
 	}
 
 	model.Build(d, req.Texts)
@@ -169,6 +182,37 @@ func (s *Server) handleLayout(w http.ResponseWriter, r *http.Request) {
 		req.Drawing.Items[i].Leader = p.Leader
 		req.Drawing.Items[i].Clean = p.Clean
 		req.Drawing.Items[i].Issues = p.Issues
+	}
+	writeJSON(w, http.StatusOK, &req.Drawing)
+}
+
+type deleteRequest struct {
+	Drawing model.Drawing `json:"drawing"`
+	ID      string        `json:"id"`
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	var req deleteRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if err := req.Drawing.Delete(req.ID); err != nil {
+		fail(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, &req.Drawing)
+}
+
+func (s *Server) handleUndoDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Drawing model.Drawing `json:"drawing"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if _, err := req.Drawing.UndoDelete(); err != nil {
+		fail(w, http.StatusBadRequest, "%v", err)
+		return
 	}
 	writeJSON(w, http.StatusOK, &req.Drawing)
 }
