@@ -336,3 +336,19 @@ tr.placeholder td { color: var(--ink-soft); text-align: center; padding: 22px 9p
   max-width: 78vw;
 }
 .toast.err { background: #9b2226; color: #fff; }
+
+/* Selection stays in drawing coordinates, including at different zoom levels. */
+#overlay { touch-action: none; user-select: none; }
+.selection-rectangle {
+  fill: rgba(31, 79, 143, 0.12);
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.selection-help {
+  margin: 8px 14px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}

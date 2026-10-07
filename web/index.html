@@ -39,6 +39,8 @@
   </div>
   <button class="btn" id="zoomOut" title="Zoom out">&minus;</button>
   <button class="btn" id="zoomIn" title="Zoom in">+</button>
+  <button class="btn" id="deleteBalloon" disabled title="Delete selected balloons and report entries (Delete / Backspace)">Delete selected</button>
+  <button class="btn" id="undoDelete" disabled title="Undo the most recent deletion, including the whole selected group (Ctrl / Cmd + Z)">Undo deletion</button>
   <button class="btn" id="tidy" title="Re-solve balloon placement for this sheet">Tidy</button>
   <button class="btn" id="exportSvg">SVG</button>
   <button class="btn primary" id="exportXlsx">Export AS9102</button>
@@ -70,6 +72,8 @@
       <h2>Characteristics</h2>
       <span class="count" id="count">—</span>
     </div>
+
+    <p class="selection-help">Ctrl/Cmd-click to select multiple balloons, or drag a rectangle from empty drawing space. Escape clears the selection.</p>
 
     <div class="tolerances">
       <details>

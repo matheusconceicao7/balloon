@@ -17,7 +17,8 @@ const state = {
   texts: [],        // every extracted run, all pages
   page: 0,          // zero-based page index
   zoom: 1.3,
-  selected: null,   // item id
+  selected: new Set(), // selected item ids on the current sheet
+  busy: false,     // serialize drawing edits so stale responses cannot restore deletions
 };
 
 // ---------------------------------------------------------------- extraction
@@ -76,69 +77,80 @@ async function extractPage(page, index) {
 // ------------------------------------------------------------------- loading
 
 async function loadPDF(file) {
-  toast(`Reading ${file.name}…`);
-  const buf = await file.arrayBuffer();
-  state.pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  if (state.busy) return;
+  setDrawingBusy(true);
+  try {
+    toast(`Reading ${file.name}…`);
+    const buf = await file.arrayBuffer();
+    state.pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
-  const pages = [];
-  let texts = [];
-  for (let n = 1; n <= state.pdf.numPages; n++) {
-    const page = await state.pdf.getPage(n);
-    const { runs, width, height } = await extractPage(page, n - 1);
-    pages.push({ index: n - 1, width, height });
-    texts = texts.concat(runs);
+    const pages = [];
+    let texts = [];
+    for (let n = 1; n <= state.pdf.numPages; n++) {
+      const page = await state.pdf.getPage(n);
+      const { runs, width, height } = await extractPage(page, n - 1);
+      pages.push({ index: n - 1, width, height });
+      texts = texts.concat(runs);
+    }
+
+    state.texts = texts;
+    state.page = 0;
+    state.selected = new Set();
+
+    const guessed = file.name.replace(/\.pdf$/i, '');
+    if (!$('partNumber').value) $('partNumber').value = guessed;
+
+    await build({
+      id: 'local',
+      name: $('partName').value,
+      part_number: $('partNumber').value || guessed,
+      revision: $('revision').value,
+      pages,
+    });
+
+    await renderPage();
+    toast(`${state.drawing.items.length} characteristics found`);
+  } finally {
+    setDrawingBusy(false);
   }
-
-  state.texts = texts;
-  state.page = 0;
-
-  const guessed = file.name.replace(/\.pdf$/i, '');
-  if (!$('partNumber').value) $('partNumber').value = guessed;
-
-  await build({
-    id: 'local',
-    name: $('partName').value,
-    part_number: $('partNumber').value || guessed,
-    revision: $('revision').value,
-    pages,
-  });
-
-  await renderPage();
-  toast(`${state.drawing.items.length} characteristics found`);
 }
 
 async function loadDemo() {
-  const res = await fetch('/api/demo');
-  if (!res.ok) return toast('Could not load the demo', true);
-  const { drawing, texts } = await res.json();
+  if (state.busy) return;
+  setDrawingBusy(true);
+  try {
+    const res = await fetch('/api/demo');
+    if (!res.ok) return toast('Could not load the demo', true);
+    const { drawing, texts } = await res.json();
 
-  state.pdf = null;
-  state.texts = texts;
-  state.page = 0;
-  state.drawing = drawing;
+    state.pdf = null;
+    state.texts = texts;
+    state.page = 0;
+    state.selected = new Set();
+    state.drawing = drawing;
 
-  $('partNumber').value = drawing.part_number || '';
-  $('partName').value = drawing.name || '';
-  $('revision').value = drawing.revision || '';
+    $('partNumber').value = drawing.part_number || '';
+    $('partName').value = drawing.name || '';
+    $('revision').value = drawing.revision || '';
 
-  await renderPage();
-  toast(`Demo part loaded — ${drawing.items.length} characteristics`);
+    await renderPage();
+    toast(`Demo part loaded — ${drawing.items.length} characteristics`);
+  } finally {
+    setDrawingBusy(false);
+  }
 }
 
 async function build(meta) {
   const body = {
     drawing: meta,
     texts: state.texts,
-    tolerances: {
-      1: num($('tol1').value, 0.2),
-      2: num($('tol2').value, 0.1),
-      3: num($('tol3').value, 0.05),
-    },
-    angular: num($('tolAng').value, 0.5),
-    unit: 'mm',
+    ...parserOptions(),
   };
   const res = await post('/api/build', body);
-  if (res) state.drawing = res;
+  if (res) {
+    state.drawing = res;
+    state.selected = new Set();
+  }
 }
 
 // ------------------------------------------------------------------ rendering
@@ -146,6 +158,7 @@ async function build(meta) {
 async function renderPage() {
   const d = state.drawing;
   if (!d) return;
+  state.selected = new Set([...state.selected].filter(id => findItem(id)?.page === state.page));
 
   $('empty').hidden = true;
   $('sheet').hidden = false;
@@ -213,7 +226,7 @@ function balloonNode(item) {
   g.classList.add('balloon');
   if (!item.clean) g.classList.add('unclean');
   if (!item.include) g.classList.add('excluded');
-  if (item.id === state.selected) g.classList.add('selected');
+  if (state.selected.has(item.id)) g.classList.add('selected');
   g.dataset.id = item.id;
 
   const leader = document.createElementNS(SVG_NS, 'line');
@@ -266,14 +279,14 @@ function drawTable() {
   for (const item of items) {
     const tr = document.createElement('tr');
     tr.dataset.id = item.id;
-    if (item.id === state.selected) tr.classList.add('selected');
+    if (state.selected.has(item.id)) tr.classList.add('selected');
     if (!item.include) tr.classList.add('excluded');
     if (!item.clean || item.characteristic.warnings?.length) tr.classList.add('flagged');
 
     const num = cell('td', item.number, 'c num');
 
     const req = cell('td', item.requirement, 'req editable');
-    req.contentEditable = 'true';
+    req.contentEditable = String(!state.busy);
     req.spellcheck = false;
     req.title = `as extracted: ${item.source.text}`;
     req.addEventListener('blur', () => reparse(item.id, req.textContent.trim()));
@@ -287,6 +300,7 @@ function drawTable() {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = item.include;
+    box.disabled = state.busy;
     box.title = 'Include on the inspection report';
     box.addEventListener('change', () => {
       item.include = box.checked;
@@ -299,9 +313,21 @@ function drawTable() {
     inc.appendChild(box);
 
     tr.append(num, req, lim, inc);
+    // Handle modifier selection before macOS turns Ctrl-click into a context
+    // menu. The later click must not toggle the same item a second time.
+    tr.addEventListener('pointerdown', (e) => {
+      if (state.busy || e.button !== 0 || e.target === box || e.target === req) return;
+      if (e.ctrlKey || e.metaKey) {
+        select(item.id, true);
+        e.preventDefault();
+      }
+    });
     tr.addEventListener('click', (e) => {
-      if (e.target === box || e.target === req) return;
+      if (state.busy || e.target === box || e.target === req || e.ctrlKey || e.metaKey) return;
       select(item.id);
+    });
+    tr.addEventListener('contextmenu', (e) => {
+      if (e.ctrlKey) e.preventDefault();
     });
     tbody.appendChild(tr);
   }
@@ -318,6 +344,7 @@ function updateChrome(d) {
   const total = d.items.length;
   const inspectable = d.items.filter((i) => i.include).length;
   $('count').textContent = `${inspectable} of ${total} inspectable`;
+  updateDeleteButton();
 
   const warnings = [];
   for (const it of d.items) {
@@ -336,22 +363,48 @@ function updateChrome(d) {
   const pager = document.querySelector('.pager');
   pager.hidden = d.pages.length < 2;
   $('pageLabel').textContent = `${state.page + 1} / ${d.pages.length}`;
-  $('prev').disabled = state.page === 0;
-  $('next').disabled = state.page >= d.pages.length - 1;
+  $('prev').disabled = state.busy || state.page === 0;
+  $('next').disabled = state.busy || state.page >= d.pages.length - 1;
 }
 
 // ----------------------------------------------------------------- selection
 
-function select(id) {
-  state.selected = id;
-  for (const el of document.querySelectorAll('.balloon')) {
-    el.classList.toggle('selected', el.dataset.id === id);
+function select(id, additive = false) {
+  const ids = additive ? new Set(state.selected) : new Set();
+  if (additive && ids.has(id)) ids.delete(id);
+  else ids.add(id);
+  setSelection(ids);
+  const row = document.querySelector(`#tbody tr[data-id="${CSS.escape(id)}"]`);
+  if (ids.has(id)) row?.scrollIntoView({ block: 'nearest' });
+}
+
+function setSelection(ids) {
+  const visible = new Set(itemsOnPage().map(item => item.id));
+  state.selected = new Set([...ids].filter(id => visible.has(id)));
+  updateDeleteButton();
+  for (const el of document.querySelectorAll('.balloon, #tbody tr[data-id]')) {
+    el.classList.toggle('selected', state.selected.has(el.dataset.id));
   }
-  for (const tr of document.querySelectorAll('#tbody tr')) {
-    const on = tr.dataset.id === id;
-    tr.classList.toggle('selected', on);
-    if (on) tr.scrollIntoView({ block: 'nearest' });
+}
+
+function updateDeleteButton() {
+  const count = selectedItems().length;
+  $('deleteBalloon').disabled = state.busy || !count;
+  $('deleteBalloon').textContent = count ? `Delete selected (${count})` : 'Delete selected';
+  $('undoDelete').disabled = state.busy || !(state.drawing?.deleted?.length);
+}
+
+function setDrawingBusy(busy) {
+  state.busy = busy;
+  for (const id of ['tidy', 'reparse', 'exportSvg', 'exportXlsx', 'file',
+                    'loadDemo', 'prev', 'next', 'zoomIn', 'zoomOut',
+                    'tol1', 'tol2', 'tol3', 'tolAng']) {
+    $(id).disabled = busy;
   }
+  for (const el of document.querySelectorAll('#tbody .req')) el.contentEditable = String(!busy);
+  for (const el of document.querySelectorAll('#tbody input')) el.disabled = busy;
+  if (state.drawing) updateChrome(state.drawing);
+  else updateDeleteButton();
 }
 
 // ------------------------------------------------------------------ dragging
@@ -363,37 +416,94 @@ function select(id) {
 function installDrag() {
   const overlay = $('overlay');
   let drag = null;
+  let marquee = null;
+
+  function updateMarquee(p) {
+    const x = Math.min(marquee.start.x, p.x);
+    const y = Math.min(marquee.start.y, p.y);
+    const w = Math.abs(p.x - marquee.start.x);
+    const h = Math.abs(p.y - marquee.start.y);
+    for (const [name, value] of Object.entries({ x, y, width: w, height: h })) {
+      marquee.rect.setAttribute(name, value);
+    }
+    const ids = new Set(marquee.base);
+    for (const item of itemsOnPage()) {
+      const c = item.balloon.c;
+      if (c.x >= x && c.x <= x + w && c.y >= y && c.y <= y + h) ids.add(item.id);
+    }
+    setSelection(ids);
+  }
+
+  function finishMarquee(cancel = false) {
+    if (!marquee) return;
+    const { rect, pointerId, previous } = marquee;
+    rect.remove();
+    marquee = null;
+    try { overlay.releasePointerCapture(pointerId); } catch { /* already gone */ }
+    if (cancel) setSelection(previous);
+  }
+
+  overlay.addEventListener('contextmenu', (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  });
 
   overlay.addEventListener('pointerdown', (e) => {
+    if (state.busy || e.button !== 0) return;
     const g = e.target.closest('.balloon');
-    if (!g) return;
+    const p = toSVG(e);
+    const additive = e.ctrlKey || e.metaKey;
+    if (!g) {
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.classList.add('selection-rectangle');
+      marquee = {
+        start: p, rect, pointerId: e.pointerId,
+        previous: new Set(state.selected),
+        base: additive ? new Set(state.selected) : new Set(),
+      };
+      overlay.appendChild(rect);
+      overlay.setPointerCapture(e.pointerId);
+      updateMarquee(p);
+      e.preventDefault();
+      return;
+    }
     const item = findItem(g.dataset.id);
     if (!item) return;
-
-    const p = toSVG(e);
+    select(item.id, additive);
+    e.preventDefault();
+    // Modifier-click toggles selection without beginning a balloon drag.
+    if (additive) return;
     drag = { g, item, dx: item.balloon.c.x - p.x, dy: item.balloon.c.y - p.y, moved: false };
     overlay.setPointerCapture(e.pointerId);
-    select(item.id);
-    e.preventDefault();
   });
 
   overlay.addEventListener('pointermove', (e) => {
+    if (marquee) {
+      if (state.busy) finishMarquee();
+      else updateMarquee(toSVG(e));
+      return;
+    }
     if (!drag) return;
+    if (state.busy || findItem(drag.item.id) !== drag.item) {
+      try { overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+      drag = null;
+      return;
+    }
     const p = toSVG(e);
     drag.item.balloon.c.x = p.x + drag.dx;
     drag.item.balloon.c.y = p.y + drag.dy;
     drag.item.leader = leaderFor(drag.item.source.box, drag.item.balloon);
     drag.moved = true;
-
-    // Once a human has placed it, the solver's complaint no longer applies.
     drag.item.clean = true;
     drag.item.issues = [];
-
     drag.g.replaceWith(balloonNode(drag.item));
     drag.g = overlay.querySelector(`.balloon[data-id="${CSS.escape(drag.item.id)}"]`);
   });
 
   const end = (e) => {
+    if (marquee) {
+      if (e.type !== 'pointercancel' && !state.busy) updateMarquee(toSVG(e));
+      finishMarquee(e.type === 'pointercancel');
+    }
     if (!drag) return;
     if (drag.moved) updateChrome(state.drawing);
     try { overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
@@ -401,6 +511,13 @@ function installDrag() {
   };
   overlay.addEventListener('pointerup', end);
   overlay.addEventListener('pointercancel', end);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && marquee && !e.target.isContentEditable &&
+        !e.target.closest('input, textarea, select')) {
+      finishMarquee(true);
+      e.preventDefault();
+    }
+  });
 }
 
 function toSVG(e) {
@@ -425,12 +542,60 @@ function leaderFor(box, circle) {
 
 // -------------------------------------------------------------------- actions
 
-async function reparse(id, text) {
-  const item = findItem(id);
-  if (!item || !text || text === item.requirement) return;
+// Drawing edits go through the Go model. The complete deletion history travels
+// with the drawing, so layout, rebuild and undo share the same rules.
+async function applyDrawingAction(path, extra, onSuccess) {
+  const drawing = state.drawing;
+  if (!drawing || state.busy) return false;
+  const page = state.page;
+  setDrawingBusy(true);
+  try {
+    const res = await post(path, { drawing, ...extra });
+    if (!res || state.drawing !== drawing) return false;
+    state.drawing = res;
+    // Metadata fields can be edited while the local request is in flight.
+    // Keep their current values rather than the older request snapshot.
+    syncMeta();
+    state.selected = new Set();
+    onSuccess?.(res);
+    if (page !== state.page) {
+      await renderPage();
+    } else {
+      drawOverlay(currentPage());
+      drawTable();
+      updateChrome(res);
+    }
+    return true;
+  } finally {
+    setDrawingBusy(false);
+  }
+}
 
-  const res = await post('/api/parse', {
-    text,
+async function deleteSelectedBalloon() {
+  const items = selectedItems();
+  if (!items.length) return;
+  await applyDrawingAction('/api/delete', { ids: items.map(item => item.id) }, () => {
+    toast(`${items.length} balloon${items.length === 1 ? '' : 's'} deleted — remaining balloons renumbered`);
+  });
+}
+
+async function undoDeletion() {
+  const deleted = state.drawing?.deleted || [];
+  const action = deleted[deleted.length - 1];
+  if (!action?.items?.length) return;
+  await applyDrawingAction('/api/undo-delete', {}, (drawing) => {
+    const ids = new Set(action.items.map(item => item.id));
+    const restored = drawing.items.filter(item => ids.has(item.id));
+    if (restored.length) {
+      state.page = restored[0].page;
+      state.selected = new Set(restored.filter(item => item.page === state.page).map(item => item.id));
+      toast(`${restored.length} balloon${restored.length === 1 ? '' : 's'} restored`);
+    }
+  });
+}
+
+function parserOptions() {
+  return {
     tolerances: {
       1: num($('tol1').value, 0.2),
       2: num($('tol2').value, 0.1),
@@ -438,30 +603,32 @@ async function reparse(id, text) {
     },
     angular: num($('tolAng').value, 0.5),
     unit: 'mm',
-  });
-  if (!res) return;
+  };
+}
 
-  item.characteristic = res.characteristic;
-  item.requirement = res.requirement;
-  item.limits = res.limits;
-  item.designator = res.designator;
-  item.include = res.inspectable;
-
-  drawTable();
-  drawOverlay(currentPage());
-  updateChrome(state.drawing);
-  toast(`#${item.number} re-read as ${res.requirement}`);
+async function reparse(id, text) {
+  const item = findItem(id);
+  if (state.busy || !item || !text || text === item.requirement) return;
+  setDrawingBusy(true);
+  try {
+    const res = await post('/api/parse', { text, ...parserOptions() });
+    if (!res || findItem(id) !== item) return;
+    item.characteristic = res.characteristic;
+    item.requirement = res.requirement;
+    item.limits = res.limits;
+    item.designator = res.designator;
+    item.include = res.inspectable;
+    drawTable();
+    drawOverlay(currentPage());
+    updateChrome(state.drawing);
+    toast(`#${item.number} re-read as ${res.requirement}`);
+  } finally {
+    setDrawingBusy(false);
+  }
 }
 
 async function tidy() {
-  if (!state.drawing) return;
-  const res = await post('/api/layout', { drawing: state.drawing, page: state.page });
-  if (!res) return;
-  state.drawing = res;
-  drawOverlay(currentPage());
-  drawTable();
-  updateChrome(state.drawing);
-  toast('Balloons re-placed');
+  await applyDrawingAction('/api/layout', { page: state.page }, () => toast('Balloons re-placed'));
 }
 
 async function download(path, fallbackName) {
@@ -510,6 +677,7 @@ function syncMeta() {
 // --------------------------------------------------------------------- utils
 
 const itemsOnPage = () => (state.drawing?.items || []).filter((i) => i.page === state.page);
+const selectedItems = () => itemsOnPage().filter(item => state.selected.has(item.id));
 const currentPage = () => state.drawing.pages.find((p) => p.index === state.page) || state.drawing.pages[0];
 const findItem = (id) => (state.drawing?.items || []).find((i) => i.id === id);
 const num = (v, fallback) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : fallback);
@@ -575,21 +743,17 @@ function init() {
   $('zoomIn').addEventListener('click', () => { state.zoom = Math.min(4, state.zoom * 1.25); renderPage(); });
   $('zoomOut').addEventListener('click', () => { state.zoom = Math.max(0.3, state.zoom / 1.25); renderPage(); });
   $('tidy').addEventListener('click', tidy);
+  $('deleteBalloon').addEventListener('click', deleteSelectedBalloon);
+  $('undoDelete').addEventListener('click', undoDeletion);
   $('exportXlsx').addEventListener('click', () => download('/api/export.xlsx', 'inspection.xlsx'));
   $('exportSvg').addEventListener('click', () => download('/api/export.svg', 'drawing.svg'));
 
   $('reparse').addEventListener('click', async () => {
     if (!state.drawing) return toast('Open a drawing first', true);
     syncMeta();
-    await build({
-      id: state.drawing.id,
-      name: state.drawing.name,
-      part_number: state.drawing.part_number,
-      revision: state.drawing.revision,
-      pages: state.drawing.pages.map((p) => ({ index: p.index, width: p.width, height: p.height })),
+    await applyDrawingAction('/api/build', { texts: state.texts, ...parserOptions() }, () => {
+      toast('Drawing re-read with the new defaults');
     });
-    await renderPage();
-    toast('Drawing re-read with the new defaults');
   });
 
   for (const id of ['partNumber', 'partName', 'revision']) {
@@ -597,7 +761,23 @@ function init() {
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.target.isContentEditable || e.target.tagName === 'INPUT') return;
+    if (e.defaultPrevented || e.target.isContentEditable || e.target.closest('input, textarea, select')) return;
+    if (state.busy) return;
+    if (e.key === 'Escape') { setSelection(new Set()); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.repeat &&
+        e.key.toLowerCase() === 'z' && state.drawing?.deleted?.length) {
+      e.preventDefault();
+      undoDeletion();
+      return;
+    }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat &&
+        (e.key === 'Delete' || e.key === 'Backspace')) {
+      if (selectedItems().length) {
+        e.preventDefault();
+        deleteSelectedBalloon();
+      }
+      return;
+    }
     if (e.key === 'ArrowRight' && !$('next').disabled) { state.page++; renderPage(); }
     if (e.key === 'ArrowLeft' && !$('prev').disabled) { state.page--; renderPage(); }
   });

@@ -39,6 +39,55 @@ There's a CLI too, for driving the engine without a browser:
 go test ./...
 ```
 
+## Removing unwanted balloons
+
+Click a balloon, or its number in the Characteristics table, to select it.
+Hold **Ctrl** / **Cmd** while clicking to add or remove individual balloons from
+the selection. Drag from empty space on the drawing to select a rectangle;
+balloons whose centres lie inside it are selected. Hold **Ctrl** / **Cmd** while
+dragging to add that rectangle to the existing selection. Either drag direction
+works. **Escape** clears the selection or cancels an active rectangle.
+Selections apply to the current sheet and are cleared when changing sheets.
+
+Click **Delete selected** or press **Delete** / **Backspace** to remove the whole
+selection from the drawing, SVG export, and Excel export. The remaining balloons
+are renumbered consecutively from 1 across all sheets.
+
+Click **Undo deletion** or press **Ctrl+Z** (Windows/Linux) or **Cmd+Z** (macOS)
+to restore the most recent deletion action. A group deleted together is restored
+by a single undo. Multiple actions can be undone in reverse order. Undo restores
+saved balloon positions, selects the restored group, and renumbers the drawing;
+if the restored group belongs to another sheet, the editor opens that sheet.
+Shortcuts leave native text editing alone when a text or form field has focus.
+
+Deletions and undo history survive **Tidy** and **Re-read drawing**. Re-reading
+refreshes the deleted characteristics' tolerances using the new defaults, so an
+undo restores current tolerances. Opening a PDF again, loading the demo, or
+refreshing the browser starts a fresh drawing and resets the history.
+Unchecking **Insp.** excludes a characteristic from the inspection report while
+keeping its balloon and number; report numbers therefore still match the drawing.
+
+### Tests
+
+Model and API tests cover deletion, undo, renumbering, multi-sheet ordering,
+re-reading with new defaults, and the actual exported SVG and Excel content:
+
+```bash
+go test ./...
+```
+
+Optional browser tests are also written in Go, using `chromedp`. They require
+Chrome or Chromium and start their own temporary local server:
+
+```bash
+go test -tags browser ./internal/api -run TestBrowser -count=1
+```
+
+Set `BALLOON_TEST_BROWSER` to the Chrome/Chromium executable path if automatic
+detection cannot find it. Set `BALLOON_TEST_PDF` to a two-page drawing path to
+include the optional PDF integration test. These tests do not require Node.js
+or Playwright. No browser is launched by the ordinary `go test ./...` command.
+
 ## The interesting parts
 
 **Callouts are a mess.** The same diameter symbol arrives as `⌀` (U+2300), `Ø`

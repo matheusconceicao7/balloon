@@ -65,6 +65,8 @@ type Drawing struct {
 	Revision   string `json:"revision"`
 	Pages      []Page `json:"pages"`
 	Items      []Item `json:"items"`
+	// Deleted is a stack of deletion actions, retained through layout and rebuild.
+	Deleted []Deletion `json:"deleted,omitempty"`
 
 	// Options is the title block context callouts are parsed against.
 	Options dimension.Options `json:"-"`
@@ -74,10 +76,18 @@ type Drawing struct {
 // not characteristics, number what remains in drawing-reading order, then solve
 // balloon positions page by page.
 func Build(d *Drawing, texts []TextItem) {
-	d.Items = nil
+	d.Items = []Item{}
 	opt := d.Options
 	if opt.DefaultTolerances == nil {
 		opt = dimension.DefaultOptions()
+	}
+
+	deleted := map[TextItem]*Item{}
+	for i := range d.Deleted {
+		for j := range d.Deleted[i].Items {
+			item := &d.Deleted[i].Items[j]
+			deleted[item.Source] = item
+		}
 	}
 
 	byPage := map[int][]TextItem{}
@@ -110,8 +120,8 @@ func Build(d *Drawing, texts []TextItem) {
 			if !isCharacteristic(c) {
 				continue
 			}
-			id := fmt.Sprintf("p%d-%d", page.Index, next)
-			pageItems = append(pageItems, Item{
+			id := sourceID(t)
+			item := Item{
 				ID:          id,
 				Number:      next,
 				Page:        page.Index,
@@ -121,7 +131,15 @@ func Build(d *Drawing, texts []TextItem) {
 				Requirement: c.Requirement(),
 				LimitsText:  c.Limits(),
 				Designator:  c.Designator(),
-			})
+			}
+			if old, removed := deleted[t]; removed {
+				// Refresh parsed tolerances for undo, retaining saved placement.
+				item.Balloon, item.Leader = old.Balloon, old.Leader
+				item.Clean, item.Issues = old.Clean, old.Issues
+				*old = item
+				continue
+			}
+			pageItems = append(pageItems, item)
 			anchors = append(anchors, layout.Anchor{
 				ID:     id,
 				Number: next,
