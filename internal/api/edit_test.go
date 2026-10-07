@@ -140,3 +140,30 @@ func TestEditEndpointsRejectInvalidActions(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchDeleteUndoThroughLayoutRebuildAndExports(t *testing.T) {
+	texts := []model.TextItem{
+		{Text: "123.4", Page: 0, Box: layout.Rect{X: 100, Y: 100, W: 30, H: 10}},
+		{Text: "20.0", Page: 0, Box: layout.Rect{X: 100, Y: 200, W: 30, H: 10}},
+		{Text: "30.0", Page: 1, Box: layout.Rect{X: 100, Y: 100, W: 30, H: 10}},
+	}
+	d := editDrawing(t, "/api/build", buildRequest{Drawing: model.Drawing{Pages: []model.Page{
+		{Index: 0, Width: 842, Height: 595}, {Index: 1, Width: 842, Height: 595},
+	}}, Texts: texts})
+	d = editDrawing(t, "/api/delete", map[string]any{"drawing": d, "ids": []string{d.Items[2].ID, d.Items[0].ID}})
+	d = editDrawing(t, "/api/layout", layoutRequest{Drawing: d, Page: 0})
+	d = editDrawing(t, "/api/build", buildRequest{Drawing: d, Texts: texts})
+	if len(d.Items) != 1 || len(d.Deleted) != 1 || len(d.Deleted[0].Items) != 2 {
+		t.Fatal("batch history lost through layout/rebuild")
+	}
+	checkEditedExports(t, d, false)
+	w := do(t, "POST", "/api/export.svg", exportRequest{Drawing: d, Page: 1})
+	if strings.Contains(w.Body.String(), ">30.0</text>") {
+		t.Error("second-sheet SVG still contains deleted balloon")
+	}
+	d = editDrawing(t, "/api/undo-delete", map[string]any{"drawing": d})
+	if len(d.Items) != 3 || len(d.Deleted) != 0 {
+		t.Fatal("one undo did not restore entire batch")
+	}
+	checkEditedExports(t, d, true)
+}

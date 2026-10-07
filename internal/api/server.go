@@ -188,7 +188,8 @@ func (s *Server) handleLayout(w http.ResponseWriter, r *http.Request) {
 
 type deleteRequest struct {
 	Drawing model.Drawing `json:"drawing"`
-	ID      string        `json:"id"`
+	ID      string        `json:"id,omitempty"`
+	IDs     []string      `json:"ids,omitempty"`
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +197,15 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if err := req.Drawing.Delete(req.ID); err != nil {
+	if req.ID != "" && len(req.IDs) > 0 {
+		fail(w, http.StatusBadRequest, "use id or ids, not both")
+		return
+	}
+	ids := req.IDs
+	if req.ID != "" {
+		ids = []string{req.ID}
+	}
+	if err := req.Drawing.DeleteMany(ids); err != nil {
 		fail(w, http.StatusBadRequest, "%v", err)
 		return
 	}

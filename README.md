@@ -41,15 +41,23 @@ go test ./...
 
 ## Removing unwanted balloons
 
-Select a balloon, or its number in the Characteristics table, then click
-**Delete balloon** or press **Delete** / **Backspace**. This removes the balloon
-and its inspection entry from the drawing, SVG export, and Excel export. The
-remaining balloons are renumbered consecutively from 1 across all sheets.
+Click a balloon, or its number in the Characteristics table, to select it.
+Hold **Ctrl** / **Cmd** while clicking to add or remove individual balloons from
+the selection. Drag from empty space on the drawing to select a rectangle;
+balloons whose centres lie inside it are selected. Hold **Ctrl** / **Cmd** while
+dragging to add that rectangle to the existing selection. Either drag direction
+works. **Escape** clears the selection or cancels an active rectangle.
+Selections apply to the current sheet and are cleared when changing sheets.
+
+Click **Delete selected** or press **Delete** / **Backspace** to remove the whole
+selection from the drawing, SVG export, and Excel export. The remaining balloons
+are renumbered consecutively from 1 across all sheets.
 
 Click **Undo deletion** or press **Ctrl+Z** (Windows/Linux) or **Cmd+Z** (macOS)
-to restore the last deleted balloon. Multiple deletions can be undone in reverse
-order. Undo restores the saved balloon position and renumbers the drawing;
-if the restored balloon belongs to another sheet, the editor opens that sheet.
+to restore the most recent deletion action. A group deleted together is restored
+by a single undo. Multiple actions can be undone in reverse order. Undo restores
+saved balloon positions, selects the restored group, and renumbers the drawing;
+if the restored group belongs to another sheet, the editor opens that sheet.
 Shortcuts leave native text editing alone when a text or form field has focus.
 
 Deletions and undo history survive **Tidy** and **Re-read drawing**. Re-reading

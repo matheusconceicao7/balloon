@@ -65,8 +65,8 @@ type Drawing struct {
 	Revision   string `json:"revision"`
 	Pages      []Page `json:"pages"`
 	Items      []Item `json:"items"`
-	// Deleted is a stack of removed items, retained through layout and rebuild.
-	Deleted []Item `json:"deleted,omitempty"`
+	// Deleted is a stack of deletion actions, retained through layout and rebuild.
+	Deleted []Deletion `json:"deleted,omitempty"`
 
 	// Options is the title block context callouts are parsed against.
 	Options dimension.Options `json:"-"`
@@ -82,9 +82,12 @@ func Build(d *Drawing, texts []TextItem) {
 		opt = dimension.DefaultOptions()
 	}
 
-	deleted := map[TextItem]int{}
-	for i, it := range d.Deleted {
-		deleted[it.Source] = i
+	deleted := map[TextItem]*Item{}
+	for i := range d.Deleted {
+		for j := range d.Deleted[i].Items {
+			item := &d.Deleted[i].Items[j]
+			deleted[item.Source] = item
+		}
 	}
 
 	byPage := map[int][]TextItem{}
@@ -129,12 +132,11 @@ func Build(d *Drawing, texts []TextItem) {
 				LimitsText:  c.Limits(),
 				Designator:  c.Designator(),
 			}
-			if i, removed := deleted[t]; removed {
+			if old, removed := deleted[t]; removed {
 				// Refresh parsed tolerances for undo, retaining saved placement.
-				old := d.Deleted[i]
 				item.Balloon, item.Leader = old.Balloon, old.Leader
 				item.Clean, item.Issues = old.Clean, old.Issues
-				d.Deleted[i] = item
+				*old = item
 				continue
 			}
 			pageItems = append(pageItems, item)

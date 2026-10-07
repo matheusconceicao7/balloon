@@ -167,3 +167,109 @@ func TestBrowserMultiPagePDF(t *testing.T) {
 	waitEditor(t, ctx, `document.querySelector('#pageLabel').textContent==='1 / 2'`)
 	waitItemCount(t, ctx, firstCount)
 }
+
+func clickEditorElement(t *testing.T, ctx context.Context, selector string, modifier chromedp.Modifier) {
+	t.Helper()
+	browserDo(t, ctx, chromedp.ScrollIntoView(chromedp.CSS(selector)))
+	pos := browserValue[[]float64](t, ctx, fmt.Sprintf(`(()=>{const b=document.querySelector(%q).getBoundingClientRect();return [b.x+b.width/2,b.y+b.height/2]})()`, selector))
+	browserDo(t, ctx, chromedp.MouseClickXY(pos[0], pos[1], chromedp.ButtonModifiers(modifier)))
+}
+
+func TestBrowserMultiSelectionBatchUndo(t *testing.T) {
+	ctx := editorBrowser(t)
+	count := loadEditorDemo(t, ctx)
+	original := browserValue[[]string](t, ctx, `Array.from(document.querySelectorAll('#tbody .req'),el=>el.textContent)`)
+	clickEditorElement(t, ctx, "#tbody tr:nth-child(1) .num", chromedp.ModifierNone)
+	clickEditorElement(t, ctx, "#tbody tr:nth-child(2) .num", chromedp.ModifierCtrl)
+	clickEditorElement(t, ctx, "#tbody tr:nth-child(3) .num", chromedp.ModifierMeta)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 3 {
+		t.Fatalf("selected %d balloons, want 3", got)
+	}
+	clickEditorElement(t, ctx, "#tbody tr:nth-child(2) .num", chromedp.ModifierCtrl)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('#tbody tr.selected').length`); got != 2 {
+		t.Fatalf("toggle selection leaves %d rows, want 2", got)
+	}
+	browserDo(t, ctx, chromedp.KeyEvent(kb.Delete))
+	waitItemCount(t, ctx, count-2)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
+	waitItemCount(t, ctx, count-2)
+	browserDo(t, ctx, chromedp.KeyEvent("z", chromedp.KeyModifiers(chromedp.ModifierCtrl)))
+	waitItemCount(t, ctx, count)
+	if got := browserValue[[]string](t, ctx, `Array.from(document.querySelectorAll('#tbody .req'),el=>el.textContent)`); !reflect.DeepEqual(got, original) {
+		t.Error("one undo did not restore original batch in drawing order")
+	}
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 2 {
+		t.Error("restored batch should remain selected")
+	}
+}
+
+func TestBrowserRectangleSelectDeleteAndUndo(t *testing.T) {
+	ctx := editorBrowser(t)
+	count := loadEditorDemo(t, ctx)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#zoomOut")), chromedp.Click(chromedp.CSS("#zoomOut")))
+	// Drag from bottom-right to top-left; all balloons fit within these bounds.
+	bounds := browserValue[[]float64](t, ctx, `(()=>{const b=document.querySelector('#overlay').getBoundingClientRect();return [b.left+3,b.top+3,b.right-3,b.bottom-3]})()`)
+	browserDo(t, ctx,
+		chromedp.MouseEvent(chromedp.MousePressed, bounds[2], bounds[3], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+		chromedp.MouseEvent(chromedp.MouseMoved, bounds[0], bounds[1], chromedp.ButtonLeft),
+	)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.selection-rectangle').length`); got != 1 {
+		t.Fatal("drag must show a selection rectangle")
+	}
+	browserDo(t, ctx, chromedp.MouseEvent(chromedp.MouseReleased, bounds[0], bounds[1], chromedp.ButtonLeft, chromedp.ClickCount(1)))
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != count {
+		t.Fatalf("rectangle selected %d balloons, want %d", got, count)
+	}
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.selection-rectangle').length`); got != 0 {
+		t.Error("selection rectangle remains after release")
+	}
+	// Escape clears the full-sheet selection. Modifier-click works on balloons
+	// themselves as well as the table, and a modifier rectangle adds to it.
+	browserDo(t, ctx, chromedp.KeyEvent(kb.Escape))
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 0 {
+		t.Error("Escape did not clear selection")
+	}
+	clickEditorElement(t, ctx, "#overlay .balloon:nth-of-type(1) circle:not(.tip)", chromedp.ModifierNone)
+	clickEditorElement(t, ctx, "#overlay .balloon:nth-of-type(2) circle:not(.tip)", chromedp.ModifierMeta)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 2 {
+		t.Fatal("Cmd-click did not add a balloon")
+	}
+	clickEditorElement(t, ctx, "#overlay .balloon:nth-of-type(2) circle:not(.tip)", chromedp.ModifierCtrl)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 1 {
+		t.Fatal("Ctrl-click did not toggle a balloon off")
+	}
+	second := browserValue[[]float64](t, ctx, `(()=>{const b=document.querySelector('#overlay .balloon:nth-of-type(2) circle:not(.tip)').getBoundingClientRect();return [b.left-2,b.top-2,b.right+2,b.bottom+2]})()`)
+	browserDo(t, ctx,
+		chromedp.MouseEvent(chromedp.MousePressed, second[0], second[1], chromedp.ButtonLeft, chromedp.ClickCount(1), chromedp.ButtonModifiers(chromedp.ModifierMeta)),
+		chromedp.MouseEvent(chromedp.MouseMoved, second[2], second[3], chromedp.ButtonLeft),
+		chromedp.MouseEvent(chromedp.MouseReleased, second[2], second[3], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+	)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 2 {
+		t.Fatalf("additive rectangle selected %d balloons, want 2", got)
+	}
+	// Cancelling a new rectangle restores the prior selection.
+	browserDo(t, ctx,
+		chromedp.MouseEvent(chromedp.MousePressed, bounds[2], bounds[3], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+		chromedp.MouseEvent(chromedp.MouseMoved, bounds[0], bounds[1], chromedp.ButtonLeft),
+		chromedp.KeyEvent(kb.Escape),
+		chromedp.MouseEvent(chromedp.MouseReleased, bounds[0], bounds[1], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+	)
+	if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon.selected').length`); got != 2 {
+		t.Error("cancelled rectangle changed prior selection")
+	}
+	browserDo(t, ctx,
+		chromedp.MouseEvent(chromedp.MousePressed, bounds[0], bounds[1], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+		chromedp.MouseEvent(chromedp.MouseMoved, bounds[2], bounds[3], chromedp.ButtonLeft),
+		chromedp.MouseEvent(chromedp.MouseReleased, bounds[2], bounds[3], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+	)
+	browserDo(t, ctx, chromedp.KeyEvent(kb.Backspace))
+	waitItemCount(t, ctx, 0)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#undoDelete")))
+	waitItemCount(t, ctx, count)
+	if !browserValue[bool](t, ctx, `document.querySelector('#undoDelete').disabled`) {
+		t.Error("full rectangle deletion should be one undo action")
+	}
+}

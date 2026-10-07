@@ -43,7 +43,7 @@ func TestDeleteRenumbersAcrossPagesWithoutChangingOtherItems(t *testing.T) {
 	if !reflect.DeepEqual(d.Items[0], survivor) {
 		t.Error("deletion changed a surviving item's content, identity or placement")
 	}
-	if len(d.Deleted) != 1 || d.Deleted[0].ID != id {
+	if len(d.Deleted) != 1 || d.Deleted[0].Items[0].ID != id {
 		t.Error("deleted item not saved for undo")
 	}
 }
@@ -151,5 +151,87 @@ func TestUndoKeepsReadingOrderWhenRebuildAddsEarlierCallouts(t *testing.T) {
 	assertSequence(t, d, added, a, b)
 	if d.Items[1].Balloon != position {
 		t.Error("undo lost deleted balloon's saved position")
+	}
+}
+
+func TestBatchDeletionIsOneUndoAction(t *testing.T) {
+	a, b, c, d := at("10.0", 100, 100), at("20.0", 200, 100), at("30.0", 300, 100), at("40.0", 400, 100)
+	drawing := build(a, b, c, d)
+	original := append([]Item(nil), drawing.Items...)
+	// Selection order and duplicate IDs must not affect drawing or undo order.
+	if err := drawing.DeleteMany([]string{original[2].ID, original[0].ID, original[2].ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertSequence(t, drawing, b, d)
+	if len(drawing.Deleted) != 1 {
+		t.Fatal("batch must create exactly one history entry")
+	}
+	if err := drawing.Delete(drawing.Items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	assertSequence(t, drawing, d)
+	restored, err := drawing.UndoDelete()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 {
+		t.Fatal("first undo restored the wrong action")
+	}
+	assertSequence(t, drawing, b, d)
+	restored, err = drawing.UndoDelete()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 2 {
+		t.Fatal("batch undo must restore both balloons")
+	}
+	if !reflect.DeepEqual(drawing.Items, original) {
+		t.Error("batch undo did not restore all original items and positions")
+	}
+}
+
+func TestBatchDeletionRejectsInvalidSelectionAtomically(t *testing.T) {
+	for _, ids := range [][]string{nil, {}, {"missing"}} {
+		drawing := build(at("10.0", 100, 100), at("20.0", 200, 100))
+		if len(ids) > 0 {
+			ids = append([]string{drawing.Items[0].ID}, ids...)
+		}
+		before, _ := json.Marshal(drawing)
+		if err := drawing.DeleteMany(ids); err == nil {
+			t.Error("invalid batch should fail")
+		}
+		after, _ := json.Marshal(drawing)
+		if string(before) != string(after) {
+			t.Error("invalid selection partially deleted balloons")
+		}
+	}
+}
+
+func TestBatchUndoSurvivesJSONAndRebuildAcrossSheets(t *testing.T) {
+	a, b, c := at("10.0", 100, 100), at("20.0", 200, 100), at("30.0", 100, 100)
+	c.Page = 1
+	drawing := &Drawing{Pages: []Page{page(), {Index: 1, Width: 842, Height: 595}}}
+	Build(drawing, []TextItem{a, b, c})
+	if err := drawing.DeleteMany([]string{drawing.Items[0].ID, drawing.Items[2].ID}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(drawing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Drawing
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	back.Options = dimension.DefaultOptions()
+	back.Options.DefaultTolerances = map[int]float64{1: 0.4}
+	Build(&back, []TextItem{a, b, c})
+	assertSequence(t, &back, b)
+	if _, err := back.UndoDelete(); err != nil {
+		t.Fatal(err)
+	}
+	assertSequence(t, &back, a, b, c)
+	if back.Items[0].Char.Upper != 0.4 || back.Items[2].Char.Upper != 0.4 {
+		t.Error("batch undo restored stale tolerance defaults")
 	}
 }

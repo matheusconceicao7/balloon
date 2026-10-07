@@ -15,36 +15,64 @@ func sourceID(source TextItem) string {
 	return fmt.Sprintf("p%d-%x", source.Page, sum[:12])
 }
 
-// Delete saves the complete item for undo and removes it from both render and
-// export input. The deletion history is carried by the browser with the drawing.
-func (d *Drawing) Delete(id string) error {
-	for i, it := range d.Items {
-		if it.ID != id {
-			continue
-		}
-		d.Deleted = append(d.Deleted, it)
-		d.Items = append(d.Items[:i:i], d.Items[i+1:]...)
-		d.renumber()
-		return nil
-	}
-	return fmt.Errorf("no balloon with id %q", id)
+// Deletion records a whole user action so one undo restores its entire batch.
+type Deletion struct {
+	Items []Item `json:"items"`
 }
 
-// UndoDelete restores the most recently deleted item in drawing reading order.
-// Saving only an array offset would restore it in the wrong place if re-reading
-// recognised another callout earlier in the drawing.
-func (d *Drawing) UndoDelete() (Item, error) {
-	if len(d.Deleted) == 0 {
-		return Item{}, fmt.Errorf("no deletion to undo")
+func (d *Drawing) Delete(id string) error {
+	return d.DeleteMany([]string{id})
+}
+
+// DeleteMany validates the entire selection before changing the drawing. The
+// saved items follow drawing order, regardless of selection order or duplicate IDs.
+func (d *Drawing) DeleteMany(ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("no balloons selected")
 	}
-	restored := d.Deleted[len(d.Deleted)-1]
-	for _, it := range d.Items {
-		if it.Source == restored.Source || it.ID == restored.ID {
-			return Item{}, fmt.Errorf("balloon is already present")
+	selected := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		selected[id] = true
+	}
+	removed := make([]Item, 0, len(selected))
+	remaining := make([]Item, 0, len(d.Items))
+	for _, item := range d.Items {
+		if selected[item.ID] {
+			removed = append(removed, item)
+		} else {
+			remaining = append(remaining, item)
 		}
 	}
+	if len(removed) != len(selected) {
+		return fmt.Errorf("selection contains an unknown balloon")
+	}
+	d.Deleted = append(d.Deleted, Deletion{Items: removed})
+	d.Items = remaining
+	d.renumber()
+	return nil
+}
+
+// UndoDelete restores the most recent deletion action in drawing reading order.
+// Saving only an array offset would restore it in the wrong place if re-reading
+// recognised another callout earlier in the drawing.
+func (d *Drawing) UndoDelete() ([]Item, error) {
+	if len(d.Deleted) == 0 {
+		return nil, fmt.Errorf("no deletion to undo")
+	}
+	restored := d.Deleted[len(d.Deleted)-1].Items
+	if len(restored) == 0 {
+		return nil, fmt.Errorf("empty deletion action")
+	}
+	for _, removed := range restored {
+		for _, it := range d.Items {
+			if it.Source == removed.Source || it.ID == removed.ID {
+				return nil, fmt.Errorf("balloon is already present")
+			}
+		}
+	}
+
 	d.Deleted = d.Deleted[:len(d.Deleted)-1]
-	d.Items = append(d.Items, restored)
+	d.Items = append(d.Items, restored...)
 	pages := map[int]int{}
 	for i, p := range d.Pages {
 		pages[p.Index] = i
@@ -61,12 +89,17 @@ func (d *Drawing) UndoDelete() (Item, error) {
 		return x.Box.X < y.Box.X
 	})
 	d.renumber()
+	ids := map[string]bool{}
+	for _, it := range restored {
+		ids[it.ID] = true
+	}
+	result := make([]Item, 0, len(restored))
 	for _, it := range d.Items {
-		if it.ID == restored.ID {
-			return it, nil
+		if ids[it.ID] {
+			result = append(result, it)
 		}
 	}
-	return restored, nil
+	return result, nil
 }
 
 func (d *Drawing) renumber() {

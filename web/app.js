@@ -17,7 +17,7 @@ const state = {
   texts: [],        // every extracted run, all pages
   page: 0,          // zero-based page index
   zoom: 1.3,
-  selected: null,   // item id
+  selected: new Set(), // selected item ids on the current sheet
   busy: false,     // serialize drawing edits so stale responses cannot restore deletions
 };
 
@@ -95,7 +95,7 @@ async function loadPDF(file) {
 
     state.texts = texts;
     state.page = 0;
-    state.selected = null;
+    state.selected = new Set();
 
     const guessed = file.name.replace(/\.pdf$/i, '');
     if (!$('partNumber').value) $('partNumber').value = guessed;
@@ -126,7 +126,7 @@ async function loadDemo() {
     state.pdf = null;
     state.texts = texts;
     state.page = 0;
-    state.selected = null;
+    state.selected = new Set();
     state.drawing = drawing;
 
     $('partNumber').value = drawing.part_number || '';
@@ -149,7 +149,7 @@ async function build(meta) {
   const res = await post('/api/build', body);
   if (res) {
     state.drawing = res;
-    state.selected = null;
+    state.selected = new Set();
   }
 }
 
@@ -158,6 +158,7 @@ async function build(meta) {
 async function renderPage() {
   const d = state.drawing;
   if (!d) return;
+  state.selected = new Set([...state.selected].filter(id => findItem(id)?.page === state.page));
 
   $('empty').hidden = true;
   $('sheet').hidden = false;
@@ -225,7 +226,7 @@ function balloonNode(item) {
   g.classList.add('balloon');
   if (!item.clean) g.classList.add('unclean');
   if (!item.include) g.classList.add('excluded');
-  if (item.id === state.selected) g.classList.add('selected');
+  if (state.selected.has(item.id)) g.classList.add('selected');
   g.dataset.id = item.id;
 
   const leader = document.createElementNS(SVG_NS, 'line');
@@ -278,7 +279,7 @@ function drawTable() {
   for (const item of items) {
     const tr = document.createElement('tr');
     tr.dataset.id = item.id;
-    if (item.id === state.selected) tr.classList.add('selected');
+    if (state.selected.has(item.id)) tr.classList.add('selected');
     if (!item.include) tr.classList.add('excluded');
     if (!item.clean || item.characteristic.warnings?.length) tr.classList.add('flagged');
 
@@ -312,9 +313,21 @@ function drawTable() {
     inc.appendChild(box);
 
     tr.append(num, req, lim, inc);
+    // Handle modifier selection before macOS turns Ctrl-click into a context
+    // menu. The later click must not toggle the same item a second time.
+    tr.addEventListener('pointerdown', (e) => {
+      if (state.busy || e.button !== 0 || e.target === box || e.target === req) return;
+      if (e.ctrlKey || e.metaKey) {
+        select(item.id, true);
+        e.preventDefault();
+      }
+    });
     tr.addEventListener('click', (e) => {
-      if (e.target === box || e.target === req) return;
+      if (state.busy || e.target === box || e.target === req || e.ctrlKey || e.metaKey) return;
       select(item.id);
+    });
+    tr.addEventListener('contextmenu', (e) => {
+      if (e.ctrlKey) e.preventDefault();
     });
     tbody.appendChild(tr);
   }
@@ -356,22 +369,28 @@ function updateChrome(d) {
 
 // ----------------------------------------------------------------- selection
 
-function select(id) {
-  state.selected = id;
+function select(id, additive = false) {
+  const ids = additive ? new Set(state.selected) : new Set();
+  if (additive && ids.has(id)) ids.delete(id);
+  else ids.add(id);
+  setSelection(ids);
+  const row = document.querySelector(`#tbody tr[data-id="${CSS.escape(id)}"]`);
+  if (ids.has(id)) row?.scrollIntoView({ block: 'nearest' });
+}
+
+function setSelection(ids) {
+  const visible = new Set(itemsOnPage().map(item => item.id));
+  state.selected = new Set([...ids].filter(id => visible.has(id)));
   updateDeleteButton();
-  for (const el of document.querySelectorAll('.balloon')) {
-    el.classList.toggle('selected', el.dataset.id === id);
-  }
-  for (const tr of document.querySelectorAll('#tbody tr')) {
-    const on = tr.dataset.id === id;
-    tr.classList.toggle('selected', on);
-    if (on) tr.scrollIntoView({ block: 'nearest' });
+  for (const el of document.querySelectorAll('.balloon, #tbody tr[data-id]')) {
+    el.classList.toggle('selected', state.selected.has(el.dataset.id));
   }
 }
 
 function updateDeleteButton() {
-  const item = findItem(state.selected);
-  $('deleteBalloon').disabled = state.busy || !item || item.page !== state.page;
+  const count = selectedItems().length;
+  $('deleteBalloon').disabled = state.busy || !count;
+  $('deleteBalloon').textContent = count ? `Delete selected (${count})` : 'Delete selected';
   $('undoDelete').disabled = state.busy || !(state.drawing?.deleted?.length);
 }
 
@@ -397,24 +416,73 @@ function setDrawingBusy(busy) {
 function installDrag() {
   const overlay = $('overlay');
   let drag = null;
+  let marquee = null;
+
+  function updateMarquee(p) {
+    const x = Math.min(marquee.start.x, p.x);
+    const y = Math.min(marquee.start.y, p.y);
+    const w = Math.abs(p.x - marquee.start.x);
+    const h = Math.abs(p.y - marquee.start.y);
+    for (const [name, value] of Object.entries({ x, y, width: w, height: h })) {
+      marquee.rect.setAttribute(name, value);
+    }
+    const ids = new Set(marquee.base);
+    for (const item of itemsOnPage()) {
+      const c = item.balloon.c;
+      if (c.x >= x && c.x <= x + w && c.y >= y && c.y <= y + h) ids.add(item.id);
+    }
+    setSelection(ids);
+  }
+
+  function finishMarquee(cancel = false) {
+    if (!marquee) return;
+    const { rect, pointerId, previous } = marquee;
+    rect.remove();
+    marquee = null;
+    try { overlay.releasePointerCapture(pointerId); } catch { /* already gone */ }
+    if (cancel) setSelection(previous);
+  }
+
+  overlay.addEventListener('contextmenu', (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  });
 
   overlay.addEventListener('pointerdown', (e) => {
-    if (state.busy) return;
+    if (state.busy || e.button !== 0) return;
     const g = e.target.closest('.balloon');
-    if (!g) return;
+    const p = toSVG(e);
+    const additive = e.ctrlKey || e.metaKey;
+    if (!g) {
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.classList.add('selection-rectangle');
+      marquee = {
+        start: p, rect, pointerId: e.pointerId,
+        previous: new Set(state.selected),
+        base: additive ? new Set(state.selected) : new Set(),
+      };
+      overlay.appendChild(rect);
+      overlay.setPointerCapture(e.pointerId);
+      updateMarquee(p);
+      e.preventDefault();
+      return;
+    }
     const item = findItem(g.dataset.id);
     if (!item) return;
-
-    const p = toSVG(e);
+    select(item.id, additive);
+    e.preventDefault();
+    // Modifier-click toggles selection without beginning a balloon drag.
+    if (additive) return;
     drag = { g, item, dx: item.balloon.c.x - p.x, dy: item.balloon.c.y - p.y, moved: false };
     overlay.setPointerCapture(e.pointerId);
-    select(item.id);
-    e.preventDefault();
   });
 
   overlay.addEventListener('pointermove', (e) => {
+    if (marquee) {
+      if (state.busy) finishMarquee();
+      else updateMarquee(toSVG(e));
+      return;
+    }
     if (!drag) return;
-    // Deletion or re-reading may have removed the item during this drag.
     if (state.busy || findItem(drag.item.id) !== drag.item) {
       try { overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
       drag = null;
@@ -425,16 +493,17 @@ function installDrag() {
     drag.item.balloon.c.y = p.y + drag.dy;
     drag.item.leader = leaderFor(drag.item.source.box, drag.item.balloon);
     drag.moved = true;
-
-    // Once a human has placed it, the solver's complaint no longer applies.
     drag.item.clean = true;
     drag.item.issues = [];
-
     drag.g.replaceWith(balloonNode(drag.item));
     drag.g = overlay.querySelector(`.balloon[data-id="${CSS.escape(drag.item.id)}"]`);
   });
 
   const end = (e) => {
+    if (marquee) {
+      if (e.type !== 'pointercancel' && !state.busy) updateMarquee(toSVG(e));
+      finishMarquee(e.type === 'pointercancel');
+    }
     if (!drag) return;
     if (drag.moved) updateChrome(state.drawing);
     try { overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
@@ -442,6 +511,13 @@ function installDrag() {
   };
   overlay.addEventListener('pointerup', end);
   overlay.addEventListener('pointercancel', end);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && marquee && !e.target.isContentEditable &&
+        !e.target.closest('input, textarea, select')) {
+      finishMarquee(true);
+      e.preventDefault();
+    }
+  });
 }
 
 function toSVG(e) {
@@ -480,7 +556,7 @@ async function applyDrawingAction(path, extra, onSuccess) {
     // Metadata fields can be edited while the local request is in flight.
     // Keep their current values rather than the older request snapshot.
     syncMeta();
-    state.selected = null;
+    state.selected = new Set();
     onSuccess?.(res);
     if (page !== state.page) {
       await renderPage();
@@ -496,23 +572,24 @@ async function applyDrawingAction(path, extra, onSuccess) {
 }
 
 async function deleteSelectedBalloon() {
-  const item = findItem(state.selected);
-  if (!item || item.page !== state.page) return;
-  await applyDrawingAction('/api/delete', { id: item.id }, () => {
-    toast(`Balloon #${item.number} deleted — remaining balloons renumbered`);
+  const items = selectedItems();
+  if (!items.length) return;
+  await applyDrawingAction('/api/delete', { ids: items.map(item => item.id) }, () => {
+    toast(`${items.length} balloon${items.length === 1 ? '' : 's'} deleted — remaining balloons renumbered`);
   });
 }
 
 async function undoDeletion() {
   const deleted = state.drawing?.deleted || [];
-  const item = deleted[deleted.length - 1];
-  if (!item) return;
+  const action = deleted[deleted.length - 1];
+  if (!action?.items?.length) return;
   await applyDrawingAction('/api/undo-delete', {}, (drawing) => {
-    const restored = drawing.items.find(candidate => candidate.id === item.id);
-    if (restored) {
-      state.page = restored.page;
-      state.selected = restored.id;
-      toast(`Balloon #${restored.number} restored`);
+    const ids = new Set(action.items.map(item => item.id));
+    const restored = drawing.items.filter(item => ids.has(item.id));
+    if (restored.length) {
+      state.page = restored[0].page;
+      state.selected = new Set(restored.filter(item => item.page === state.page).map(item => item.id));
+      toast(`${restored.length} balloon${restored.length === 1 ? '' : 's'} restored`);
     }
   });
 }
@@ -600,6 +677,7 @@ function syncMeta() {
 // --------------------------------------------------------------------- utils
 
 const itemsOnPage = () => (state.drawing?.items || []).filter((i) => i.page === state.page);
+const selectedItems = () => itemsOnPage().filter(item => state.selected.has(item.id));
 const currentPage = () => state.drawing.pages.find((p) => p.index === state.page) || state.drawing.pages[0];
 const findItem = (id) => (state.drawing?.items || []).find((i) => i.id === id);
 const num = (v, fallback) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : fallback);
@@ -683,8 +761,9 @@ function init() {
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.target.isContentEditable || e.target.closest('input, textarea, select')) return;
+    if (e.defaultPrevented || e.target.isContentEditable || e.target.closest('input, textarea, select')) return;
     if (state.busy) return;
+    if (e.key === 'Escape') { setSelection(new Set()); return; }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.repeat &&
         e.key.toLowerCase() === 'z' && state.drawing?.deleted?.length) {
       e.preventDefault();
@@ -693,8 +772,7 @@ function init() {
     }
     if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat &&
         (e.key === 'Delete' || e.key === 'Backspace')) {
-      const item = findItem(state.selected);
-      if (item && item.page === state.page) {
+      if (selectedItems().length) {
         e.preventDefault();
         deleteSelectedBalloon();
       }
