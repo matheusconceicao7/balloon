@@ -5,6 +5,7 @@
 // which does the parsing, numbering and balloon placement.
 
 import * as pdfjsLib from '/vendor/pdf.mjs';
+import { exportPDF, includePDFBackground } from './export.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.mjs';
 
@@ -412,6 +413,7 @@ function setDrawingBusy(busy) {
                     'tol1', 'tol2', 'tol3', 'tolAng', 'balloonColor']) {
     $(id).disabled = busy;
   }
+  $('exportPdf').disabled = busy || !state.pdf || !state.drawing;
   for (const el of document.querySelectorAll('#tbody .req')) el.contentEditable = String(!busy);
   for (const el of document.querySelectorAll('#tbody input')) el.disabled = busy;
   if (state.drawing) updateChrome(state.drawing);
@@ -701,8 +703,10 @@ async function tidy() {
 }
 
 async function download(path, fallbackName) {
+  if (state.busy) return;
   if (!state.drawing) return toast('Open a drawing first', true);
-
+  setDrawingBusy(true);
+  try {
   syncMeta();
   const res = await fetch(path, {
     method: 'POST',
@@ -710,6 +714,7 @@ async function download(path, fallbackName) {
     body: JSON.stringify({
       drawing: state.drawing,
       page: state.page,
+      overlay_only: path === '/api/export.svg' && !!state.pdf,
       meta: {
         PartNumber: $('partNumber').value,
         PartName: $('partName').value,
@@ -722,12 +727,42 @@ async function download(path, fallbackName) {
   if (!res.ok) return toast(`Export failed (${res.status})`, true);
 
   const name = filenameFrom(res.headers.get('Content-Disposition')) || fallbackName;
-  const url = URL.createObjectURL(await res.blob());
+  const blob = path === '/api/export.svg' && state.pdf
+    ? await includePDFBackground(await res.text(), state.pdf, state.page)
+    : await res.blob();
+  saveBlob(blob, name);
+  } catch (err) {
+    toast(`Export failed: ${err.message}`, true);
+  } finally {
+    setDrawingBusy(false);
+  }
+}
+
+async function downloadPDF() {
+  if (state.busy) return;
+  if (!state.pdf || !state.drawing) return toast('Open a PDF drawing first', true);
+  setDrawingBusy(true);
+  try {
+    syncMeta();
+    toast('Exporting all PDF sheets…');
+    const base = (state.drawing.part_number || state.drawing.name || 'drawing')
+      .replace(/[\\/:*?"<>|\x00-\x1f]/g, '-');
+    saveBlob(await exportPDF(state.pdf, state.drawing), `${base}-ballooned.pdf`);
+  } catch (err) {
+    toast(`PDF export failed: ${err.message}`, true);
+  } finally {
+    setDrawingBusy(false);
+  }
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
   a.click();
-  URL.revokeObjectURL(url);
+  // Give the browser time to start consuming the download before revoking it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
   toast(`Saved ${name}`);
 }
 
@@ -837,6 +872,7 @@ function init() {
   $('undoDelete').addEventListener('click', undoDeletion);
   $('exportXlsx').addEventListener('click', () => download('/api/export.xlsx', 'inspection.xlsx'));
   $('exportSvg').addEventListener('click', () => download('/api/export.svg', 'drawing.svg'));
+  $('exportPdf').addEventListener('click', downloadPDF);
 
   $('reparse').addEventListener('click', async () => {
     if (!state.drawing) return toast('Open a drawing first', true);

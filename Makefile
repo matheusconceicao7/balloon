@@ -1,6 +1,7 @@
 BIN     := bin/balloon
 PKG     := ./cmd/balloon
 GOFILES := $(shell find . -name '*.go' -not -path './web/*')
+WEBFILES := $(shell find web -type f)
 
 .PHONY: all build test cover vet fmt demo serve clean
 
@@ -8,7 +9,7 @@ all: fmt vet test build
 
 build: $(BIN)
 
-$(BIN): $(GOFILES)
+$(BIN): $(GOFILES) $(WEBFILES) go.mod go.sum
 	go build -o $(BIN) $(PKG)
 
 test:

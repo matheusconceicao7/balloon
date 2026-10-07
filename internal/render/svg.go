@@ -18,6 +18,8 @@ import (
 // Style controls what gets drawn. The debug layers are off by default because
 // the normal output is meant to look like a marked-up drawing, not a diagnostic.
 type Style struct {
+	// OverlayOnly omits paper and extracted text when compositing on a PDF.
+	OverlayOnly   bool
 	ShowTextBoxes bool
 	ShowObstacles bool
 	// FlagUnclean shades balloons the solver could not place cleanly, so a
@@ -44,7 +46,9 @@ func SVG(w io.Writer, d *model.Drawing, pageIndex int, st Style) error {
 	bw := &errWriter{w: w}
 	bw.printf(`<svg xmlns="http://www.w3.org/2000/svg" width="%g" height="%g" viewBox="0 0 %g %g" font-family="Helvetica, Arial, sans-serif">`,
 		page.Width, page.Height, page.Width, page.Height)
-	bw.printf(`<rect width="%g" height="%g" fill="#ffffff"/>`, page.Width, page.Height)
+	if !st.OverlayOnly {
+		bw.printf(`<rect width="%g" height="%g" fill="#ffffff"/>`, page.Width, page.Height)
+	}
 
 	if st.ShowObstacles {
 		for _, o := range page.Obstacles {
@@ -55,7 +59,7 @@ func SVG(w io.Writer, d *model.Drawing, pageIndex int, st Style) error {
 
 	// Text first, so leaders and balloons sit on top of it.
 	for _, it := range d.Items {
-		if it.Page != pageIndex {
+		if st.OverlayOnly || it.Page != pageIndex {
 			continue
 		}
 		b := it.Source.Box

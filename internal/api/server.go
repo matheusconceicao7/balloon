@@ -228,9 +228,10 @@ func (s *Server) handleUndoDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 type exportRequest struct {
-	Drawing model.Drawing `json:"drawing"`
-	Meta    export.Meta   `json:"meta"`
-	Page    int           `json:"page"`
+	OverlayOnly bool          `json:"overlay_only"`
+	Drawing     model.Drawing `json:"drawing"`
+	Meta        export.Meta   `json:"meta"`
+	Page        int           `json:"page"`
 }
 
 func (s *Server) handleExportXLSX(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +258,9 @@ func (s *Server) handleExportSVG(w http.ResponseWriter, r *http.Request) {
 	name := filename(req.Drawing, "svg")
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
-	if err := render.SVG(w, &req.Drawing, req.Page, render.DefaultStyle()); err != nil {
+	style := render.DefaultStyle()
+	style.OverlayOnly = req.OverlayOnly
+	if err := render.SVG(w, &req.Drawing, req.Page, style); err != nil {
 		fmt.Printf("render: %v\n", err)
 	}
 }
