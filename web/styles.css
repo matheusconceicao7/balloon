@@ -352,3 +352,13 @@ tr.placeholder td { color: var(--ink-soft); text-align: center; padding: 22px 9p
   color: var(--ink-soft);
   font-size: 12px;
 }
+
+.adding-balloon, .adding-balloon .balloon { cursor: crosshair; }
+#addBalloon[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+#manualDialog { max-width: 460px; width: calc(100% - 48px); padding: 24px; border: 1px solid var(--ink-soft); border-radius: 8px; color: var(--ink); background: var(--surface); }
+#manualDialog::backdrop { background: rgba(0,0,0,.4); }
+#manualDialog h2 { margin-top: 0; }
+#manualDialog p { line-height: 1.5; }
+#manualCallout { display: block; box-sizing: border-box; width: 100%; margin-top: 8px; padding: 10px; font-size: 16px; }
+.manual-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+#manualError { color: #c52b2b; }

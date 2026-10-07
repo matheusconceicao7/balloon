@@ -39,6 +39,7 @@
   </div>
   <button class="btn" id="zoomOut" title="Zoom out">&minus;</button>
   <button class="btn" id="zoomIn" title="Zoom in">+</button>
+  <button class="btn" id="addBalloon" disabled aria-pressed="false">Add balloon</button>
   <button class="btn" id="deleteBalloon" disabled title="Delete selected balloons and report entries (Delete / Backspace)">Delete selected</button>
   <button class="btn" id="undoDelete" disabled title="Undo the most recent deletion, including the whole selected group (Ctrl / Cmd + Z)">Undo deletion</button>
   <button class="btn" id="tidy" title="Re-solve balloon placement for this sheet">Tidy</button>
@@ -111,6 +112,18 @@
     </div>
   </aside>
 </main>
+
+<dialog id="manualDialog" aria-labelledby="manualTitle">
+  <form id="manualForm">
+    <h2 id="manualTitle">Add a missed measure</h2>
+    <p>Confirm the complete callout, including its tolerance. Text found in the marked area is suggested below.</p>
+    <label for="manualCallout">Measure and tolerance</label>
+    <input id="manualCallout" required placeholder="145 ±2" autocomplete="off">
+    <p class="note">Examples: 145 ±2, ⌀12.5 +0.05/-0.02, R10.0. Without an explicit tolerance, title block defaults apply.</p>
+    <p id="manualError" role="alert" hidden></p>
+    <div class="manual-actions"><button type="button" class="btn" id="cancelManual">Cancel</button><button class="btn primary" id="confirmManual" type="submit">Create balloon</button></div>
+  </form>
+</dialog>
 
 <div class="toast" id="toast" hidden></div>
 

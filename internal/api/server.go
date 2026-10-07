@@ -41,6 +41,7 @@ func New(assets fs.FS) *Server {
 	s.mux.HandleFunc("POST /api/parse", s.handleParse)
 	s.mux.HandleFunc("POST /api/layout", s.handleLayout)
 	s.mux.HandleFunc("POST /api/delete", s.handleDelete)
+	s.mux.HandleFunc("POST /api/add-manual", s.handleAddManual)
 	s.mux.HandleFunc("POST /api/undo-delete", s.handleUndoDelete)
 	s.mux.HandleFunc("POST /api/export.xlsx", s.handleExportXLSX)
 	s.mux.HandleFunc("POST /api/export.svg", s.handleExportSVG)
@@ -326,4 +327,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func fail(w http.ResponseWriter, status int, format string, args ...any) {
 	writeJSON(w, status, map[string]string{"error": fmt.Sprintf(format, args...)})
+}
+
+func (s *Server) handleAddManual(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Drawing    model.Drawing      `json:"drawing"`
+		Source     model.TextItem     `json:"source"`
+		Tolerances map[string]float64 `json:"tolerances,omitempty"`
+		Angular    float64            `json:"angular,omitempty"`
+		Unit       string             `json:"unit,omitempty"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	req.Drawing.Options = optionsFrom(buildRequest{Tolerances: req.Tolerances, Angular: req.Angular, Unit: req.Unit})
+	if err := req.Drawing.AddManual(req.Source); err != nil {
+		fail(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, &req.Drawing)
 }

@@ -25,6 +25,7 @@ type TextItem struct {
 
 // Item is one ballooned characteristic on the inspection sheet.
 type Item struct {
+	Manual  bool   `json:"manual,omitempty"`
 	ID      string `json:"id"`
 	Number  int    `json:"number"`
 	Page    int    `json:"page"`
@@ -76,6 +77,12 @@ type Drawing struct {
 // not characteristics, number what remains in drawing-reading order, then solve
 // balloon positions page by page.
 func Build(d *Drawing, texts []TextItem) {
+	manual := []Item{}
+	for _, item := range d.Items {
+		if item.Manual {
+			manual = append(manual, item)
+		}
+	}
 	d.Items = []Item{}
 	opt := d.Options
 	if opt.DefaultTolerances == nil {
@@ -86,7 +93,9 @@ func Build(d *Drawing, texts []TextItem) {
 	for i := range d.Deleted {
 		for j := range d.Deleted[i].Items {
 			item := &d.Deleted[i].Items[j]
-			deleted[item.Source] = item
+			if !item.Manual {
+				deleted[item.Source] = item
+			}
 		}
 	}
 
@@ -140,15 +149,24 @@ func Build(d *Drawing, texts []TextItem) {
 				continue
 			}
 			pageItems = append(pageItems, item)
-			anchors = append(anchors, layout.Anchor{
-				ID:     id,
-				Number: next,
-				At:     t.Box.Center(),
-				Avoid:  t.Box,
-			})
 			next++
 		}
 
+		// Solve manual and detected callouts together so rebuilding cannot
+		// place a detected balloon on a retained manual balloon.
+		for _, item := range manual {
+			if item.Page == page.Index {
+				pageItems = append(pageItems, item)
+			}
+		}
+		ordered := Drawing{Pages: d.Pages, Items: pageItems}
+		ordered.sortReadingOrder()
+		pageItems = ordered.Items
+		for i := range pageItems {
+			pageItems[i].Number = len(d.Items) + i + 1
+			item := pageItems[i]
+			anchors = append(anchors, layout.Anchor{ID: item.ID, Number: item.Number, At: item.Source.Box.Center(), Avoid: item.Source.Box})
+		}
 		cfg := layout.DefaultConfig(layout.Rect{W: page.Width, H: page.Height})
 		placements := layout.Solve(anchors, page.Obstacles, cfg)
 		for i := range pageItems {
@@ -160,6 +178,8 @@ func Build(d *Drawing, texts []TextItem) {
 		}
 		d.Items = append(d.Items, pageItems...)
 	}
+	d.sortReadingOrder()
+	d.renumber()
 }
 
 // rowBand is how far apart two callouts must be vertically before they count as

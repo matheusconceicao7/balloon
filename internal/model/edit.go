@@ -65,7 +65,7 @@ func (d *Drawing) UndoDelete() ([]Item, error) {
 	}
 	for _, removed := range restored {
 		for _, it := range d.Items {
-			if it.Source == removed.Source || it.ID == removed.ID {
+			if it.ID == removed.ID || (!it.Manual && !removed.Manual && it.Source == removed.Source) {
 				return nil, fmt.Errorf("balloon is already present")
 			}
 		}
@@ -73,21 +73,7 @@ func (d *Drawing) UndoDelete() ([]Item, error) {
 
 	d.Deleted = d.Deleted[:len(d.Deleted)-1]
 	d.Items = append(d.Items, restored...)
-	pages := map[int]int{}
-	for i, p := range d.Pages {
-		pages[p.Index] = i
-	}
-	sort.SliceStable(d.Items, func(a, b int) bool {
-		x, y := d.Items[a].Source, d.Items[b].Source
-		if x.Page != y.Page {
-			return pages[x.Page] < pages[y.Page]
-		}
-		rowX, rowY := int(x.Box.Y/rowBand), int(y.Box.Y/rowBand)
-		if rowX != rowY {
-			return rowX < rowY
-		}
-		return x.Box.X < y.Box.X
-	})
+	d.sortReadingOrder()
 	d.renumber()
 	ids := map[string]bool{}
 	for _, it := range restored {
@@ -106,4 +92,22 @@ func (d *Drawing) renumber() {
 	for i := range d.Items {
 		d.Items[i].Number = i + 1
 	}
+}
+
+func (d *Drawing) sortReadingOrder() {
+	pages := map[int]int{}
+	for i, p := range d.Pages {
+		pages[p.Index] = i
+	}
+	sort.SliceStable(d.Items, func(a, b int) bool {
+		x, y := d.Items[a].Source, d.Items[b].Source
+		if x.Page != y.Page {
+			return pages[x.Page] < pages[y.Page]
+		}
+		rowX, rowY := int(x.Box.Y/rowBand), int(y.Box.Y/rowBand)
+		if rowX != rowY {
+			return rowX < rowY
+		}
+		return x.Box.X < y.Box.X
+	})
 }

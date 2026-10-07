@@ -39,6 +39,24 @@ There's a CLI too, for driving the engine without a browser:
 go test ./...
 ```
 
+## Adding a missed measure
+
+Click **Add balloon**, then drag a rectangle around the missed measure on the
+current sheet. Review the suggested PDF text or type the complete callout,
+including its tolerance (for example `145 ±2` or `⌀12.5 +0.05/-0.02`), and click
+**Create balloon**. If the PDF has no readable text in the area, enter the value
+manually. Without an explicit tolerance, the title block defaults apply at creation.
+**Cancel** or **Escape** cancels creation.
+
+The balloon and inspection-table entry are inserted in drawing reading order;
+all balloons are renumbered. Drag the balloon to adjust its placement and edit
+its requirement in the table as usual. Manual values, table edits, and the
+inspection checkbox survive **Tidy** and **Re-read drawing**. Re-read preserves
+manual values even when title block defaults change. Manual balloons also work
+with SVG/Excel exports, group selection, deletion, and undo. Deleted manual
+balloons stay deleted through re-reading. Opening another drawing or refreshing
+the browser resets this work, just as it does for other edits.
+
 ## Removing unwanted balloons
 
 Click a balloon, or its number in the Characteristics table, to select it.
@@ -70,7 +88,8 @@ keeping its balloon and number; report numbers therefore still match the drawing
 ### Tests
 
 Model and API tests cover deletion, undo, renumbering, multi-sheet ordering,
-re-reading with new defaults, and the actual exported SVG and Excel content:
+re-reading with new defaults, manual creation and its validation, and the actual
+exported SVG and Excel content:
 
 ```bash
 go test ./...

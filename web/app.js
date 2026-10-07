@@ -18,6 +18,8 @@ const state = {
   page: 0,          // zero-based page index
   zoom: 1.3,
   selected: new Set(), // selected item ids on the current sheet
+  adding: false,
+  manualBox: null,
   busy: false,     // serialize drawing edits so stale responses cannot restore deletions
 };
 
@@ -78,6 +80,7 @@ async function extractPage(page, index) {
 
 async function loadPDF(file) {
   if (state.busy) return;
+  cancelManual();
   setDrawingBusy(true);
   try {
     toast(`Reading ${file.name}…`);
@@ -117,6 +120,7 @@ async function loadPDF(file) {
 
 async function loadDemo() {
   if (state.busy) return;
+  cancelManual();
   setDrawingBusy(true);
   try {
     const res = await fetch('/api/demo');
@@ -158,6 +162,7 @@ async function build(meta) {
 async function renderPage() {
   const d = state.drawing;
   if (!d) return;
+  cancelManual();
   state.selected = new Set([...state.selected].filter(id => findItem(id)?.page === state.page));
 
   $('empty').hidden = true;
@@ -389,7 +394,8 @@ function setSelection(ids) {
 
 function updateDeleteButton() {
   const count = selectedItems().length;
-  $('deleteBalloon').disabled = state.busy || !count;
+  $('addBalloon').disabled = state.busy || !state.drawing;
+  $('deleteBalloon').disabled = state.busy || state.adding || !count;
   $('deleteBalloon').textContent = count ? `Delete selected (${count})` : 'Delete selected';
   $('undoDelete').disabled = state.busy || !(state.drawing?.deleted?.length);
 }
@@ -419,6 +425,8 @@ function installDrag() {
   let marquee = null;
 
   function updateMarquee(p) {
+    const page = currentPage();
+    p = { x: Math.max(0, Math.min(page.width, p.x)), y: Math.max(0, Math.min(page.height, p.y)) };
     const x = Math.min(marquee.start.x, p.x);
     const y = Math.min(marquee.start.y, p.y);
     const w = Math.abs(p.x - marquee.start.x);
@@ -426,6 +434,7 @@ function installDrag() {
     for (const [name, value] of Object.entries({ x, y, width: w, height: h })) {
       marquee.rect.setAttribute(name, value);
     }
+    if (marquee.manual) return;
     const ids = new Set(marquee.base);
     for (const item of itemsOnPage()) {
       const c = item.balloon.c;
@@ -436,11 +445,13 @@ function installDrag() {
 
   function finishMarquee(cancel = false) {
     if (!marquee) return;
-    const { rect, pointerId, previous } = marquee;
+    const { rect, pointerId, previous, manual } = marquee;
+    const box = { x: Number(rect.getAttribute("x")), y: Number(rect.getAttribute("y")), w: Number(rect.getAttribute("width")), h: Number(rect.getAttribute("height")) };
     rect.remove();
     marquee = null;
     try { overlay.releasePointerCapture(pointerId); } catch { /* already gone */ }
     if (cancel) setSelection(previous);
+    else if (manual && !state.busy && state.adding) openManualDialog(box);
   }
 
   overlay.addEventListener('contextmenu', (e) => {
@@ -452,11 +463,11 @@ function installDrag() {
     const g = e.target.closest('.balloon');
     const p = toSVG(e);
     const additive = e.ctrlKey || e.metaKey;
-    if (!g) {
+    if (!g || state.adding) {
       const rect = document.createElementNS(SVG_NS, 'rect');
       rect.classList.add('selection-rectangle');
       marquee = {
-        start: p, rect, pointerId: e.pointerId,
+        start: p, rect, pointerId: e.pointerId, manual: state.adding,
         previous: new Set(state.selected),
         base: additive ? new Set(state.selected) : new Set(),
       };
@@ -478,7 +489,7 @@ function installDrag() {
 
   overlay.addEventListener('pointermove', (e) => {
     if (marquee) {
-      if (state.busy) finishMarquee();
+      if (state.busy) finishMarquee(true);
       else updateMarquee(toSVG(e));
       return;
     }
@@ -514,7 +525,9 @@ function installDrag() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && marquee && !e.target.isContentEditable &&
         !e.target.closest('input, textarea, select')) {
+      const manual = marquee.manual;
       finishMarquee(true);
+      if (manual) cancelManual();
       e.preventDefault();
     }
   });
@@ -538,6 +551,56 @@ function leaderFor(box, circle) {
     a,
     b: { x: circle.c.x - (dx / len) * circle.r, y: circle.c.y - (dy / len) * circle.r },
   };
+}
+
+function cancelManual() {
+  state.adding = false;
+  state.manualBox = null;
+  $('manualDialog').close();
+  $('addBalloon').setAttribute('aria-pressed', 'false');
+  $('overlay').classList.remove('adding-balloon');
+  updateDeleteButton();
+}
+
+function openManualDialog(box) {
+  if (box.w < 2 || box.h < 2) {
+    toast('Drag a rectangle around the missed measure', true);
+    return;
+  }
+  state.manualBox = box;
+  const texts = state.texts.filter(t => t.page === state.page &&
+    t.box.x + t.box.w > box.x && t.box.x < box.x + box.w &&
+    t.box.y + t.box.h > box.y && t.box.y < box.y + box.h)
+    .sort((a, b) => Math.abs(a.box.y-b.box.y) > 2 ? a.box.y-b.box.y : a.box.x-b.box.x);
+  $('manualCallout').value = texts.map(t => t.text).join(' ');
+  $('manualError').hidden = true;
+  $('manualDialog').showModal();
+  $('manualCallout').focus();
+  $('manualCallout').select();
+}
+
+async function createManual(e) {
+  e.preventDefault();
+  if (state.busy || !state.manualBox) return;
+  const previous = new Set(state.drawing.items.map(item => item.id));
+  $('confirmManual').disabled = true;
+  $('cancelManual').disabled = true;
+  try {
+    const ok = await applyDrawingAction('/api/add-manual', {
+      source: { text: $('manualCallout').value.trim(), page: state.page, box: state.manualBox },
+      ...parserOptions(),
+    }, drawing => {
+      state.selected = new Set(drawing.items.filter(item => !previous.has(item.id)).map(item => item.id));
+    });
+    if (ok) { cancelManual(); toast('Manual balloon added — drawing renumbered'); }
+    else {
+      $('manualError').textContent = $('toast').textContent;
+      $('manualError').hidden = false;
+    }
+  } finally {
+    $('confirmManual').disabled = false;
+    $('cancelManual').disabled = false;
+  }
 }
 
 // -------------------------------------------------------------------- actions
@@ -614,6 +677,7 @@ async function reparse(id, text) {
     const res = await post('/api/parse', { text, ...parserOptions() });
     if (!res || findItem(id) !== item) return;
     item.characteristic = res.characteristic;
+    if (item.manual) item.source.text = text;
     item.requirement = res.requirement;
     item.limits = res.limits;
     item.designator = res.designator;
@@ -742,6 +806,21 @@ function init() {
   $('next').addEventListener('click', () => { state.page++; renderPage(); });
   $('zoomIn').addEventListener('click', () => { state.zoom = Math.min(4, state.zoom * 1.25); renderPage(); });
   $('zoomOut').addEventListener('click', () => { state.zoom = Math.max(0.3, state.zoom / 1.25); renderPage(); });
+  $('addBalloon').addEventListener('click', () => {
+    if (!state.drawing || state.busy) return;
+    if (state.adding) { cancelManual(); return; }
+    state.adding = true;
+    $('addBalloon').setAttribute('aria-pressed', 'true');
+    $('overlay').classList.add('adding-balloon');
+    updateDeleteButton();
+    toast('Drag a rectangle around the missed measure. Escape cancels.');
+  });
+  $('manualForm').addEventListener('submit', createManual);
+  $('cancelManual').addEventListener('click', cancelManual);
+  $('manualDialog').addEventListener('cancel', e => {
+    e.preventDefault();
+    if (!state.busy) cancelManual();
+  });
   $('tidy').addEventListener('click', tidy);
   $('deleteBalloon').addEventListener('click', deleteSelectedBalloon);
   $('undoDelete').addEventListener('click', undoDeletion);
@@ -761,9 +840,11 @@ function init() {
   }
 
   document.addEventListener('keydown', (e) => {
+    if ($('manualDialog').open) return;
     if (e.defaultPrevented || e.target.isContentEditable || e.target.closest('input, textarea, select')) return;
     if (state.busy) return;
-    if (e.key === 'Escape') { setSelection(new Set()); return; }
+    if (e.key === 'Escape') { cancelManual(); setSelection(new Set()); return; }
+    if (state.adding) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !e.repeat &&
         e.key.toLowerCase() === 'z' && state.drawing?.deleted?.length) {
       e.preventDefault();

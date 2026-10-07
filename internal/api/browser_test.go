@@ -273,3 +273,53 @@ func TestBrowserRectangleSelectDeleteAndUndo(t *testing.T) {
 		t.Error("full rectangle deletion should be one undo action")
 	}
 }
+
+func TestBrowserAddManualBalloon(t *testing.T) {
+	ctx := editorBrowser(t)
+	count := loadEditorDemo(t, ctx)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#addBalloon")))
+	bounds := browserValue[map[string]float64](t, ctx, `(()=>{const r=document.querySelector('#overlay').getBoundingClientRect();return {x:r.x+30,y:r.y+30}})()`)
+	browserDo(t, ctx,
+		chromedp.MouseEvent(chromedp.MousePressed, bounds["x"], bounds["y"], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+		chromedp.MouseEvent(chromedp.MouseMoved, bounds["x"]+80, bounds["y"]+25, chromedp.ButtonLeft),
+		chromedp.MouseEvent(chromedp.MouseReleased, bounds["x"]+80, bounds["y"]+25, chromedp.ButtonLeft))
+	waitEditor(t, ctx, `document.querySelector('#manualDialog').open`)
+	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`document.querySelector('#manualCallout').value='SEE NOTE 3'`), chromedp.Click(chromedp.CSS("#confirmManual")))
+	waitEditor(t, ctx, `!document.querySelector('#manualError').hidden && !document.querySelector('#confirmManual').disabled`)
+	waitItemCount(t, ctx, count)
+	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`document.querySelector('#manualCallout').value='145 ±2'`), chromedp.Click(chromedp.CSS("#confirmManual")))
+	waitItemCount(t, ctx, count+1)
+	waitEditor(t, ctx, `!document.querySelector('#manualDialog').open && document.querySelector('#tbody .selected .req').textContent.includes('145')`)
+	id := browserValue[string](t, ctx, `document.querySelector('#tbody .selected').dataset.id`)
+	// Edit the manual value through the normal requirement cell.
+	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`(()=>{let el=document.querySelector('#tbody .selected .req');el.focus();el.textContent='146 ±3';el.blur()})()`))
+	waitEditor(t, ctx, `document.querySelector('#tbody .selected .req').textContent.includes('146') && !document.querySelector('#tidy').disabled`)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
+	selector := fmt.Sprintf(`#tbody tr[data-id="%s"] .num`, id)
+	clickEditorElement(t, ctx, selector, 0)
+	browserDo(t, ctx, chromedp.KeyEvent(kb.Delete))
+	waitItemCount(t, ctx, count)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#reparse")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
+	waitItemCount(t, ctx, count)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#undoDelete")))
+	waitItemCount(t, ctx, count+1)
+	if !browserValue[bool](t, ctx, `document.querySelector('#tbody .selected .req').textContent.includes('146')`) {
+		t.Fatal("manual edit lost through reread and undo")
+	}
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#addBalloon")), chromedp.KeyEvent(kb.Escape))
+	if browserValue[string](t, ctx, `document.querySelector('#addBalloon').getAttribute('aria-pressed')`) != "false" {
+		t.Fatal("escape did not cancel add mode")
+	}
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#addBalloon")),
+		chromedp.MouseEvent(chromedp.MousePressed, bounds["x"], bounds["y"], chromedp.ButtonLeft, chromedp.ClickCount(1)),
+		chromedp.MouseEvent(chromedp.MouseMoved, bounds["x"]+50, bounds["y"]+20, chromedp.ButtonLeft), chromedp.KeyEvent(kb.Escape),
+		chromedp.MouseEvent(chromedp.MouseReleased, bounds["x"]+50, bounds["y"]+20, chromedp.ButtonLeft))
+	if !browserValue[bool](t, ctx, `document.querySelector('#addBalloon').getAttribute('aria-pressed')==='false' && !document.querySelector('#manualDialog').open && !document.querySelector('.selection-rectangle')`) {
+		t.Fatal("escape during region drag did not cancel manual creation")
+	}
+
+}
