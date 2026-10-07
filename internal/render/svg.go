@@ -20,7 +20,7 @@ import (
 type Style struct {
 	ShowTextBoxes bool
 	ShowObstacles bool
-	// FlagUnclean tints balloons the solver could not place cleanly, so a
+	// FlagUnclean shades balloons the solver could not place cleanly, so a
 	// reviewer's eye lands on the ones that need dragging.
 	FlagUnclean bool
 }
@@ -71,35 +71,35 @@ func SVG(w io.Writer, d *model.Drawing, pageIndex int, st Style) error {
 		if it.Page != pageIndex {
 			continue
 		}
-		drawLeader(bw, it.Leader)
+		drawLeader(bw, it.Leader, d.BalloonInk())
 	}
 
 	for _, it := range d.Items {
 		if it.Page != pageIndex {
 			continue
 		}
-		drawBalloon(bw, it, st)
+		drawBalloon(bw, it, st, d.BalloonInk())
 	}
 
 	bw.printf(`</svg>`)
 	return bw.err
 }
 
-func drawLeader(bw *errWriter, s layout.Segment) {
+func drawLeader(bw *errWriter, s layout.Segment, ink string) {
 	if s.Len() == 0 {
 		return
 	}
-	bw.printf(`<line x1="%g" y1="%g" x2="%g" y2="%g" stroke="#1a1a1a" stroke-width="0.8"/>`,
-		s.A.X, s.A.Y, s.B.X, s.B.Y)
+	bw.printf(`<line x1="%g" y1="%g" x2="%g" y2="%g" stroke="%s" stroke-width="0.8"/>`,
+		s.A.X, s.A.Y, s.B.X, s.B.Y, ink)
 	// A small filled dot marks the feature the leader points at, which is how
 	// leaders terminate on a real drawing.
-	bw.printf(`<circle cx="%g" cy="%g" r="1.6" fill="#1a1a1a"/>`, s.A.X, s.A.Y)
+	bw.printf(`<circle cx="%g" cy="%g" r="1.6" fill="%s"/>`, s.A.X, s.A.Y, ink)
 }
 
-func drawBalloon(bw *errWriter, it model.Item, st Style) {
-	stroke, fill := "#1a1a1a", "#ffffff"
+func drawBalloon(bw *errWriter, it model.Item, st Style, ink string) {
+	stroke, fill := ink, "#ffffff"
 	if st.FlagUnclean && !it.Clean {
-		stroke, fill = "#b8860b", "#fff8e1"
+		fill = "#fff8e1"
 	}
 	c := it.Balloon
 	bw.printf(`<circle cx="%g" cy="%g" r="%g" fill="%s" stroke="%s" stroke-width="1.1"/>`,

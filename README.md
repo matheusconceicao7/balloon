@@ -39,6 +39,15 @@ There's a CLI too, for driving the engine without a browser:
 go test ./...
 ```
 
+## Balloon color
+
+Choose **Red**, **Black**, or **Green** from **Balloon color** in the toolbar.
+One color applies to every balloon, number, leader line, and leader dot across
+all sheets, including manual balloons and SVG exports. Black is the default.
+The choice survives Tidy, Re-read drawing, deletion, and undo within the session.
+Selection uses a thicker outline and shading; placement warnings use shading,
+so neither changes the chosen ink color.
+
 ## Adding a missed measure
 
 Click **Add balloon**, then drag a rectangle around the missed measure on the

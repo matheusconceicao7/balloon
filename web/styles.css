@@ -193,34 +193,32 @@ main {
 .balloon:active { cursor: grabbing; }
 .balloon circle {
   fill: #fff;
-  stroke: #14161a;
+  stroke: var(--balloon-ink, #1a1a1a);
   stroke-width: 1.1;
   vector-effect: non-scaling-stroke;
 }
 .balloon text {
-  fill: #14161a;
+  fill: var(--balloon-ink, #1a1a1a);
   font-family: system-ui, sans-serif;
   text-anchor: middle;
   user-select: none;
   pointer-events: none;
 }
 .balloon .leader {
-  stroke: #14161a;
+  stroke: var(--balloon-ink, #1a1a1a);
   stroke-width: 0.9;
   vector-effect: non-scaling-stroke;
 }
-.balloon .tip { fill: #14161a; }
+.balloon .tip { fill: var(--balloon-ink, #1a1a1a); }
 
-.balloon.unclean circle { stroke: #b8860b; fill: #fff8e1; }
-.balloon.unclean text { fill: #8a6100; }
+.balloon.unclean circle:not(.tip) { fill: #fff8e1; }
 
 .balloon.excluded circle { stroke-dasharray: 3 2; opacity: 0.6; }
 .balloon.excluded text { opacity: 0.6; }
 
-.balloon.selected circle { stroke: #1f4f8f; stroke-width: 2.2; fill: #eaf1fb; }
-.balloon.selected text { fill: #1f4f8f; font-weight: 600; }
-.balloon.selected .leader { stroke: #1f4f8f; stroke-width: 1.6; }
-.balloon.selected .tip { fill: #1f4f8f; }
+.balloon.selected circle:not(.tip) { stroke-width: 2.2; fill: #eaf1fb; }
+.balloon.selected text { font-weight: 600; }
+.balloon.selected .leader { stroke-width: 1.6; }
 
 /* ---------- side panel ---------- */
 
@@ -362,3 +360,6 @@ tr.placeholder td { color: var(--ink-soft); text-align: center; padding: 22px 9p
 #manualCallout { display: block; box-sizing: border-box; width: 100%; margin-top: 8px; padding: 10px; font-size: 16px; }
 .manual-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 #manualError { color: #c52b2b; }
+
+.balloon-color { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.balloon-color select { padding: 5px; }

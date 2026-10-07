@@ -60,12 +60,13 @@ type Page struct {
 
 // Drawing is the unit of work: a part, a revision, and the sheets that define it.
 type Drawing struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	PartNumber string `json:"part_number"`
-	Revision   string `json:"revision"`
-	Pages      []Page `json:"pages"`
-	Items      []Item `json:"items"`
+	BalloonColor string `json:"balloon_color,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	PartNumber   string `json:"part_number"`
+	Revision     string `json:"revision"`
+	Pages        []Page `json:"pages"`
+	Items        []Item `json:"items"`
 	// Deleted is a stack of deletion actions, retained through layout and rebuild.
 	Deleted []Deletion `json:"deleted,omitempty"`
 
@@ -267,4 +268,17 @@ func (d *Drawing) Warnings() []string {
 		}
 	}
 	return out
+}
+
+// BalloonInk resolves the limited palette and safely defaults older drawings
+// or unsupported values to black. Raw input never becomes SVG markup.
+func (d *Drawing) BalloonInk() string {
+	switch d.BalloonColor {
+	case "red":
+		return "#c62828"
+	case "green":
+		return "#16803c"
+	default:
+		return "#1a1a1a"
+	}
 }

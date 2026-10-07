@@ -131,6 +131,7 @@ async function loadDemo() {
     state.texts = texts;
     state.page = 0;
     state.selected = new Set();
+    drawing.balloon_color = $("balloonColor").value;
     state.drawing = drawing;
 
     $('partNumber').value = drawing.part_number || '';
@@ -146,7 +147,7 @@ async function loadDemo() {
 
 async function build(meta) {
   const body = {
-    drawing: meta,
+    drawing: { ...meta, balloon_color: $("balloonColor").value },
     texts: state.texts,
     ...parserOptions(),
   };
@@ -209,6 +210,10 @@ async function renderPage() {
 function drawOverlay(page) {
   const overlay = $('overlay');
   overlay.textContent = '';
+  const palette = { red: '#c62828', black: '#1a1a1a', green: '#16803c' };
+  const color = state.drawing.balloon_color || 'black';
+  $('balloonColor').value = palette[color] ? color : 'black';
+  overlay.style.setProperty('--balloon-ink', palette[color] || palette.black);
 
   if (!state.pdf) {
     for (const t of state.texts.filter((t) => t.page === state.page)) {
@@ -404,7 +409,7 @@ function setDrawingBusy(busy) {
   state.busy = busy;
   for (const id of ['tidy', 'reparse', 'exportSvg', 'exportXlsx', 'file',
                     'loadDemo', 'prev', 'next', 'zoomIn', 'zoomOut',
-                    'tol1', 'tol2', 'tol3', 'tolAng']) {
+                    'tol1', 'tol2', 'tol3', 'tolAng', 'balloonColor']) {
     $(id).disabled = busy;
   }
   for (const el of document.querySelectorAll('#tbody .req')) el.contentEditable = String(!busy);
@@ -733,6 +738,7 @@ function filenameFrom(header) {
 
 function syncMeta() {
   if (!state.drawing) return;
+  state.drawing.balloon_color = $('balloonColor').value;
   state.drawing.part_number = $('partNumber').value;
   state.drawing.name = $('partName').value;
   state.drawing.revision = $('revision').value;
@@ -806,6 +812,11 @@ function init() {
   $('next').addEventListener('click', () => { state.page++; renderPage(); });
   $('zoomIn').addEventListener('click', () => { state.zoom = Math.min(4, state.zoom * 1.25); renderPage(); });
   $('zoomOut').addEventListener('click', () => { state.zoom = Math.max(0.3, state.zoom / 1.25); renderPage(); });
+  $('balloonColor').addEventListener('change', () => {
+    if (!state.drawing || state.busy) return;
+    syncMeta();
+    drawOverlay(currentPage());
+  });
   $('addBalloon').addEventListener('click', () => {
     if (!state.drawing || state.busy) return;
     if (state.adding) { cancelManual(); return; }

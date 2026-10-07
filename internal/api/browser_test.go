@@ -323,3 +323,25 @@ func TestBrowserAddManualBalloon(t *testing.T) {
 	}
 
 }
+
+func TestBrowserBalloonColors(t *testing.T) {
+	ctx := editorBrowser(t)
+	count := loadEditorDemo(t, ctx)
+	for _, test := range []struct{ name, rgb string }{{"red", "rgb(198, 40, 40)"}, {"green", "rgb(22, 128, 60)"}, {"black", "rgb(26, 26, 26)"}} {
+		browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](fmt.Sprintf(`(()=>{const el=document.querySelector('#balloonColor');el.value=%q;el.dispatchEvent(new Event('change',{bubbles:true}))})()`, test.name)))
+		check := fmt.Sprintf(`Array.from(document.querySelectorAll('.balloon')).every(g=>getComputedStyle(g.querySelector('circle:not(.tip)')).stroke===%q && getComputedStyle(g.querySelector('text')).fill===%q && getComputedStyle(g.querySelector('.leader')).stroke===%q && getComputedStyle(g.querySelector('.tip')).fill===%q)`, test.rgb, test.rgb, test.rgb, test.rgb)
+		waitEditor(t, ctx, check)
+		clickEditorElement(t, ctx, "#tbody .num", 0)
+		waitEditor(t, ctx, check)
+		browserDo(t, ctx, chromedp.KeyEvent(kb.Delete))
+		waitItemCount(t, ctx, count-1)
+		browserDo(t, ctx, chromedp.Click(chromedp.CSS("#undoDelete")))
+		waitItemCount(t, ctx, count)
+		browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
+		waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
+		waitEditor(t, ctx, check)
+	}
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
+	waitEditor(t, ctx, `document.querySelector('#balloonColor').value==='black' && Array.from(document.querySelectorAll('.balloon circle:not(.tip)')).every(el=>getComputedStyle(el).stroke==='rgb(26, 26, 26)')`)
+}
