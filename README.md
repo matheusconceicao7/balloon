@@ -30,6 +30,80 @@ and no network access at runtime — one Go binary with the frontend embedded.
 
 No drawing to hand? Click **Load the demo part**.
 
+### Windows desktop launcher
+
+Build the double-clickable Windows application from macOS or Linux:
+
+```bash
+make windows
+# Or without Make:
+go run github.com/tc-hib/go-winres@v0.3.3 make --in cmd/balloon-desktop/resources/winres.json --arch amd64 --out cmd/balloon-desktop/rsrc
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-H windowsgui -s -w" -o bin/balloon-windows-amd64.exe ./cmd/balloon-desktop
+```
+
+Copy `bin/balloon-windows-amd64.exe` to the Windows computer and double-click it.
+Choose a **Port** (default `8080`) and click **Start server**. The launcher opens
+the editor in your default browser after starting the local server. If the port
+is occupied, choose another and try again. **Open browser** reopens the editor;
+the URL field can also be copied into a browser manually.
+
+Keep the launcher open while using the editor. **Stop server** releases the
+port so you can change it and restart; closing the launcher also stops the
+server. Closing the browser alone leaves the server running. The desktop
+launcher listens only on `127.0.0.1`, for use on the same computer.
+
+The executable includes the frontend and requires no Go, Node.js, PowerShell
+script, or extra desktop runtime installation on the target computer. For
+Windows ARM64, use `make windows WINDOWS_ARCH=arm64`.
+
+To build directly on Windows with Go installed, run in PowerShell:
+
+```powershell
+go run github.com/tc-hib/go-winres@v0.3.3 make --in cmd/balloon-desktop/resources/winres.json --arch amd64 --out cmd/balloon-desktop/rsrc
+go build -trimpath -ldflags="-H windowsgui -s -w" -o balloon.exe ./cmd/balloon-desktop
+```
+
+The CLI remains available: `make windows-cli` builds
+`bin/balloon-cli-windows-amd64.exe`, which supports the existing commands, including
+`balloon-cli-windows-amd64.exe serve -addr :9090`.
+
+Both Windows builds embed the editor's Balloon logo. The desktop launcher also
+uses it in the title bar and taskbar. The Make targets generate icon resources
+for AMD64 and ARM64 before building. Executables and generated `.syso` resource
+objects are ignored by Git; only the logo assets and resource definitions are
+committed. Windows release builds omit debug symbols to reduce file size.
+To change the icon, edit `cmd/balloon-desktop/resources/balloon.svg`, render the
+PNG with librsvg, and regenerate the Windows resource objects:
+
+```bash
+rsvg-convert --width 512 --height 512 --output cmd/balloon-desktop/resources/balloon.png cmd/balloon-desktop/resources/balloon.svg
+make windows-resources
+make windows
+```
+
+`windows-resources` uses a pinned Go resource tool at build time; it adds no
+runtime dependency to the application.
+
+#### Windows security warnings
+
+These local builds are unsigned, so an "Unknown publisher" label is expected
+when Windows asks to verify the publisher. Balloon does not require
+administrator permissions: both builds declare `asInvoker` in their Windows
+manifest. Launch them normally rather than using **Run as administrator**.
+For a UAC prompt, see [Microsoft's explanation of publisher verification](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/how-it-works).
+
+A "Windows protected your PC" SmartScreen
+warning can mean the publisher or this new executable has no established
+reputation. Adding an icon does not change that. For distribution, sign the
+final executable with a trusted Authenticode code-signing certificate and a
+timestamp; new signed applications can still show reputation warnings. Sign
+after building and adding resources, since subsequent changes can invalidate
+the signature. See [Microsoft's SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+
+An antivirus detection naming a threat is a different issue: record the threat
+name and have the executable investigated. If confirmed to be a false positive,
+submit it using [Microsoft's file submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission).
+
 There's a CLI too, for driving the engine without a browser:
 
 ```bash
@@ -209,6 +283,7 @@ internal/api/         HTTP handlers, stateless
 internal/demo/        the synthetic fixture both the CLI and the browser use
 web/                  frontend (vanilla JS + vendored pdf.js), embedded in the binary
 cmd/balloon/          CLI: parse, demo, build, serve
+cmd/balloon-desktop/  native Windows launcher: port, start/stop, open browser
 ```
 
 `internal/dimension` and `internal/layout` depend on nothing else in the

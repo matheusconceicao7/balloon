@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The editor's existing Balloon mark, on a light tile for desktop contrast. -->
+  <rect x="0" y="0" width="32" height="32" rx="6" fill="#fff"/>
+  <circle cx="16" cy="13" r="9" fill="none" stroke="#111" stroke-width="2.5"/>
+  <path d="M16 22v8" stroke="#111" stroke-width="2.5"/>
+</svg>

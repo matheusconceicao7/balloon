@@ -1,6 +1,7 @@
 bin/
 dist/
 *.exe
+*.syso
 *.test
 *.out
 coverage.*
@@ -18,3 +19,4 @@ uploads/
 .env.local
 .idea/
 .vscode/
+docs/superpowers/
