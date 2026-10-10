@@ -20,7 +20,7 @@ func TestBrowserPDFExportPreservesPages(t *testing.T) {
 	browserDo(t, ctx, chromedp.SetUploadFiles(chromedp.CSS("#file"), []string{path}))
 	waitEditor(t, ctx, `document.querySelectorAll('.balloon').length>0 && !document.querySelector('#exportSvg').disabled`)
 	// Keep the actual downloaded blob and the original input for round-trip checks.
-	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`window.__pdfBlob=null; const create=URL.createObjectURL; URL.createObjectURL=function(blob){if(blob.type==='application/pdf')window.__pdfBlob=blob;return create.call(this,blob)};`), chromedp.Click(chromedp.CSS("#exportPdf")))
+	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`window.__pdfBlob=null; const create=URL.createObjectURL; URL.createObjectURL=function(blob){if(blob.type==='application/pdf')window.__pdfBlob=blob;return create.call(this,blob)};`), chromedp.Click(chromedp.CSS("#exportOptions")), chromedp.Click(chromedp.CSS("#exportPdf")))
 	waitEditor(t, ctx, `window.__pdfBlob!==null`)
 	result, err := chromedp.Run(ctx, chromedp.Evaluate[string](`(async()=>{
       const lib=await import('/vendor/pdf.mjs');
@@ -110,7 +110,7 @@ func TestBrowserSVGIncludesOriginalPDF(t *testing.T) {
 	ctx := editorBrowser(t)
 	browserDo(t, ctx, chromedp.SetUploadFiles(chromedp.CSS("#file"), []string{path}))
 	waitEditor(t, ctx, `document.querySelectorAll('.balloon').length>0 && !document.querySelector('#exportSvg').disabled`)
-	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`window.__svg=null; const create=URL.createObjectURL; URL.createObjectURL=function(blob){blob.text().then(s=>window.__svg=s);return create.call(this,blob)};`), chromedp.Click(chromedp.CSS("#exportSvg")))
+	browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](`window.__svg=null; const create=URL.createObjectURL; URL.createObjectURL=function(blob){blob.text().then(s=>window.__svg=s);return create.call(this,blob)};`), chromedp.Click(chromedp.CSS("#exportOptions")), chromedp.Click(chromedp.CSS("#exportSvg")))
 	waitEditor(t, ctx, `window.__svg!==null`)
 	svg := browserValue[string](t, ctx, `window.__svg`)
 	if !strings.Contains(svg, "data:image/png;base64,") {

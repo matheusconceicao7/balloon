@@ -112,6 +112,8 @@ async function loadPDF(file) {
       pages,
     });
 
+    $('documentName').textContent = file.name;
+    $('documentName').title = file.name;
     await renderPage();
     toast(`${state.drawing.items.length} characteristics found`);
   } finally {
@@ -139,6 +141,8 @@ async function loadDemo() {
     $('partName').value = drawing.name || '';
     $('revision').value = drawing.revision || '';
 
+    $('documentName').textContent = 'Demo part';
+    $('documentName').title = drawing.name || 'Demo part';
     await renderPage();
     toast(`Demo part loaded — ${drawing.items.length} characteristics`);
   } finally {
@@ -356,6 +360,7 @@ function updateChrome(d) {
   const inspectable = d.items.filter((i) => i.include).length;
   $('count').textContent = `${inspectable} of ${total} inspectable`;
   updateDeleteButton();
+  $('zoomLabel').textContent = `${Math.round(state.zoom * 100)}%`;
 
   const warnings = [];
   for (const it of d.items) {
@@ -401,6 +406,7 @@ function setSelection(ids) {
 function updateDeleteButton() {
   const count = selectedItems().length;
   $('addBalloon').disabled = state.busy || !state.drawing;
+  $('addHint').hidden = !state.adding;
   $('deleteBalloon').disabled = state.busy || state.adding || !count;
   $('deleteBalloon').textContent = count ? `Delete selected (${count})` : 'Delete selected';
   $('undoDelete').disabled = state.busy || !(state.drawing?.deleted?.length);
@@ -409,10 +415,13 @@ function updateDeleteButton() {
 function setDrawingBusy(busy) {
   state.busy = busy;
   for (const id of ['tidy', 'reparse', 'exportSvg', 'exportXlsx', 'file',
-                    'loadDemo', 'prev', 'next', 'zoomIn', 'zoomOut',
+                    'loadDemo', 'openDrawing', 'prev', 'next', 'zoomIn', 'zoomOut',
                     'tol1', 'tol2', 'tol3', 'tolAng', 'balloonColor']) {
-    $(id).disabled = busy;
+    $(id).disabled = busy || (!state.drawing && !['file', 'loadDemo', 'openDrawing', 'tol1', 'tol2', 'tol3', 'tolAng'].includes(id));
   }
+  $('exportOptions').disabled = busy || !state.drawing;
+  $('openDrawing').classList.toggle('primary', !state.drawing);
+  $('exportXlsx').classList.toggle('primary', !!state.drawing);
   $('exportPdf').disabled = busy || !state.pdf || !state.drawing;
   for (const el of document.querySelectorAll('#tbody .req')) el.contentEditable = String(!busy);
   for (const el of document.querySelectorAll('#tbody input')) el.disabled = busy;
@@ -825,6 +834,22 @@ function toast(msg, isError = false) {
 // ---------------------------------------------------------------------- wire
 
 function init() {
+  const narrowToolbar = window.matchMedia('(max-width: 1200px)');
+  const updateAppearanceOverflow = () => {
+    const tools = $('appearanceTools');
+    if (tools.matches(':popover-open')) tools.hidePopover();
+    $('appearanceOptions').hidden = !narrowToolbar.matches;
+    if (narrowToolbar.matches) tools.setAttribute('popover', 'auto');
+    else tools.removeAttribute('popover');
+  };
+  narrowToolbar.addEventListener('change', updateAppearanceOverflow);
+  updateAppearanceOverflow();
+  setDrawingBusy(false);
+  $('openDrawing').addEventListener('click', () => $('file').click());
+  $('exportMenu').addEventListener('click', e => {
+    if (e.target.closest('button')) $('exportMenu').hidePopover();
+  });
+
   installDrag();
 
   $('file').addEventListener('change', (e) => {

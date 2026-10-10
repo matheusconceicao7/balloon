@@ -89,7 +89,7 @@ func TestBrowserDeleteRenumberUndoAndReRead(t *testing.T) {
 	}
 	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
-	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS(".tolerances summary")), chromedp.Click(chromedp.CSS("#reparse")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
 	waitItemCount(t, ctx, count)
 	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#undoDelete")))
@@ -113,6 +113,7 @@ func TestBrowserShortcutsProtectTextEditing(t *testing.T) {
 	count := loadEditorDemo(t, ctx)
 	browserDo(t, ctx, chromedp.ScrollIntoView(chromedp.CSS("#tbody .num")), chromedp.Click(chromedp.CSS("#tbody .num")), chromedp.KeyEvent(kb.Delete))
 	waitItemCount(t, ctx, count-1)
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS(".report-details summary")))
 	for _, selector := range []string{"#partNumber", "#tbody .req"} {
 		browserDo(t, ctx, chromedp.Evaluate[chromedp.Void](fmt.Sprintf(`document.querySelector(%q).focus()`, selector)), chromedp.KeyEvent(kb.Backspace), chromedp.KeyEvent(kb.Delete), chromedp.KeyEvent("z", chromedp.KeyModifiers(chromedp.ModifierCtrl)))
 		if got := browserValue[int](t, ctx, `document.querySelectorAll('.balloon').length`); got != count-1 {
@@ -193,7 +194,7 @@ func TestBrowserMultiSelectionBatchUndo(t *testing.T) {
 	waitItemCount(t, ctx, count-2)
 	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
-	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS(".tolerances summary")), chromedp.Click(chromedp.CSS("#reparse")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
 	waitItemCount(t, ctx, count-2)
 	browserDo(t, ctx, chromedp.KeyEvent("z", chromedp.KeyModifiers(chromedp.ModifierCtrl)))
@@ -296,7 +297,7 @@ func TestBrowserAddManualBalloon(t *testing.T) {
 	waitEditor(t, ctx, `document.querySelector('#tbody .selected .req').textContent.includes('146') && !document.querySelector('#tidy').disabled`)
 	browserDo(t, ctx, chromedp.Click(chromedp.CSS("#tidy")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
-	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS(".tolerances summary")), chromedp.Click(chromedp.CSS("#reparse")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
 	selector := fmt.Sprintf(`#tbody tr[data-id="%s"] .num`, id)
 	clickEditorElement(t, ctx, selector, 0)
@@ -341,7 +342,7 @@ func TestBrowserBalloonColors(t *testing.T) {
 		waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Balloons re-placed'`)
 		waitEditor(t, ctx, check)
 	}
-	browserDo(t, ctx, chromedp.Click(chromedp.CSS("summary")), chromedp.Click(chromedp.CSS("#reparse")))
+	browserDo(t, ctx, chromedp.Click(chromedp.CSS(".tolerances summary")), chromedp.Click(chromedp.CSS("#reparse")))
 	waitEditor(t, ctx, `document.querySelector('#toast').textContent==='Drawing re-read with the new defaults'`)
 	waitEditor(t, ctx, `document.querySelector('#balloonColor').value==='black' && Array.from(document.querySelectorAll('.balloon circle:not(.tip)')).every(el=>getComputedStyle(el).stroke==='rgb(26, 26, 26)')`)
 }

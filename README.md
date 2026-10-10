@@ -39,12 +39,24 @@ There's a CLI too, for driving the engine without a browser:
 go test ./...
 ```
 
+## Editor controls
+
+The header contains **Open drawing**, the current filename, and **Export report
+(AS9102)**. The adjacent dropdown exports a ballooned PDF of all sheets or an
+SVG of the current sheet. PDF export requires an original PDF; the demo supports
+SVG and Excel.
+
+Above the drawing, balloon editing is grouped separately from appearance,
+sheet navigation, and zoom. **Auto-arrange** repositions balloons on the current
+sheet. Smaller screens put appearance controls under **Appearance**. Part number,
+part name, revision, and serial are in **Report details** in the side panel.
+
 ## Balloon color
 
-Choose **Red**, **Black**, or **Green** from **Balloon color** in the toolbar.
+Choose **Red**, **Black**, or **Green** from **Color** above the drawing (under **Appearance** on smaller screens).
 One color applies to every balloon, number, leader line, and leader dot across
 all sheets, including manual balloons and SVG exports. Black is the default.
-The choice survives Tidy, Re-read drawing, deletion, and undo within the session.
+The choice survives Auto-arrange, Re-read drawing, deletion, and undo within the session.
 Selection uses a thicker outline and shading; placement warnings use shading,
 so neither changes the chosen ink color.
 
@@ -60,7 +72,7 @@ manually. Without an explicit tolerance, the title block defaults apply at creat
 The balloon and inspection-table entry are inserted in drawing reading order;
 all balloons are renumbered. Drag the balloon to adjust its placement and edit
 its requirement in the table as usual. Manual values, table edits, and the
-inspection checkbox survive **Tidy** and **Re-read drawing**. Re-read preserves
+inspection checkbox survive **Auto-arrange** and **Re-read drawing**. Re-read preserves
 manual values even when title block defaults change. Manual balloons also work
 with SVG/Excel exports, group selection, deletion, and undo. Deleted manual
 balloons stay deleted through re-reading. Opening another drawing or refreshing
@@ -87,7 +99,7 @@ saved balloon positions, selects the restored group, and renumbers the drawing;
 if the restored group belongs to another sheet, the editor opens that sheet.
 Shortcuts leave native text editing alone when a text or form field has focus.
 
-Deletions and undo history survive **Tidy** and **Re-read drawing**. Re-reading
+Deletions and undo history survive **Auto-arrange** and **Re-read drawing**. Re-reading
 refreshes the deleted characteristics' tolerances using the new defaults, so an
 undo restores current tolerances. Opening a PDF again, loading the demo, or
 refreshing the browser starts a fresh drawing and resets the history.

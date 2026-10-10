@@ -17,45 +17,52 @@
     </svg>
     <strong>balloon</strong>
   </div>
-
-  <label class="btn primary">
-    Open drawing
-    <input type="file" id="file" accept="application/pdf" hidden>
-  </label>
-
-  <div class="meta">
-    <label>Part no. <input id="partNumber" placeholder="DWG-1042" size="12"></label>
-    <label>Part name <input id="partName" placeholder="Bracket" size="14"></label>
-    <label>Rev <input id="revision" placeholder="C" size="3"></label>
-    <label>Serial <input id="serial" placeholder="SN-001" size="9"></label>
+  <button class="btn primary" id="openDrawing">Open drawing</button>
+  <input type="file" id="file" accept="application/pdf" hidden>
+  <span class="document-name" id="documentName">No drawing open</span>
+  <div class="export-actions" role="group" aria-label="Export drawing and report">
+    <button class="btn" id="exportXlsx" disabled title="Download the AS9102 inspection report as Excel">Export report <span class="report-format">(AS9102)</span></button>
+    <button class="btn" id="exportOptions" disabled popovertarget="exportMenu" aria-label="More export options" title="More export options">▾</button>
   </div>
-
-  <div class="spacer"></div>
-
-  <div class="pager" hidden>
-    <button class="btn" id="prev" title="Previous sheet">&larr;</button>
-    <span id="pageLabel">1 / 1</span>
-    <button class="btn" id="next" title="Next sheet">&rarr;</button>
+  <div class="tool-popover export-menu" id="exportMenu" popover="auto" aria-label="Export options">
+    <button class="btn" id="exportPdf" disabled>Ballooned PDF <small>All sheets · original drawing with balloons</small></button>
+    <button class="btn" id="exportSvg" disabled>SVG <small>Current sheet · drawing with balloons</small></button>
   </div>
-  <button class="btn" id="zoomOut" title="Zoom out">&minus;</button>
-  <button class="btn" id="zoomIn" title="Zoom in">+</button>
-  <label class="balloon-color">Balloon color
-    <select id="balloonColor" aria-label="Balloon color">
-      <option value="red">Red</option>
-      <option value="black" selected>Black</option>
-      <option value="green">Green</option>
-    </select>
-  </label>
-  <button class="btn" id="addBalloon" disabled aria-pressed="false">Add balloon</button>
-  <button class="btn" id="deleteBalloon" disabled title="Delete selected balloons and report entries (Delete / Backspace)">Delete selected</button>
-  <button class="btn" id="undoDelete" disabled title="Undo the most recent deletion, including the whole selected group (Ctrl / Cmd + Z)">Undo deletion</button>
-  <button class="btn" id="tidy" title="Re-solve balloon placement for this sheet">Tidy</button>
-  <button class="btn" id="exportSvg" title="Export current sheet with balloons">SVG</button>
-  <button class="btn" id="exportPdf" disabled title="Export all original PDF sheets with balloons">Export PDF</button>
-  <button class="btn primary" id="exportXlsx">Export AS9102</button>
 </header>
 
 <main>
+  <section class="workspace" aria-label="Drawing workspace">
+    <div class="drawing-toolbar">
+      <div class="tool-group edit-tools" role="group" aria-label="Edit balloons">
+        <button class="btn" id="addBalloon" disabled aria-pressed="false" aria-describedby="addHint">Add balloon</button>
+        <button class="btn" id="undoDelete" disabled title="Undo the most recent deletion (Ctrl / Cmd + Z)">Undo deletion</button>
+        <button class="btn danger" id="deleteBalloon" disabled title="Delete selected balloons and report entries (Delete / Backspace)">Delete selected</button>
+      </div>
+      <button class="btn" id="appearanceOptions" hidden popovertarget="appearanceTools">Appearance ▾</button>
+      <div class="tool-group appearance-tools" id="appearanceTools" role="group" aria-label="Balloon appearance">
+        <button class="btn" id="tidy" disabled title="Repositions balloons on this sheet">Auto-arrange</button>
+        <label class="balloon-color">Color
+          <select id="balloonColor" disabled aria-label="Balloon color">
+            <option value="red">Red</option>
+            <option value="black" selected>Black</option>
+            <option value="green">Green</option>
+          </select>
+        </label>
+      </div>
+      <div class="view-tools" role="group" aria-label="Sheet navigation and zoom">
+        <div class="pager" hidden>
+          <button class="btn" id="prev" title="Previous sheet" aria-label="Previous sheet">←</button>
+          <span class="sheet-label">Sheet <span id="pageLabel">1 / 1</span></span>
+          <button class="btn" id="next" title="Next sheet" aria-label="Next sheet">→</button>
+        </div>
+        <div class="zoom-tools">
+          <button class="btn" id="zoomOut" disabled title="Zoom out" aria-label="Zoom out">−</button>
+          <output id="zoomLabel" aria-label="Zoom level">130%</output>
+          <button class="btn" id="zoomIn" disabled title="Zoom in" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+    </div>
+    <p class="add-hint" id="addHint" hidden role="status">Drag around a measure · Esc to cancel</p>
   <section class="stage" id="stage">
     <div class="empty" id="empty">
       <h1>Drop a drawing PDF here</h1>
@@ -76,11 +83,23 @@
     </div>
   </section>
 
+  </section>
+
   <aside class="panel">
     <div class="panel-head">
       <h2>Characteristics</h2>
       <span class="count" id="count">—</span>
     </div>
+
+    <details class="report-details">
+      <summary>Report details</summary>
+      <div class="meta">
+        <label>Part number <input id="partNumber" placeholder="DWG-1042"></label>
+        <label>Part name <input id="partName" placeholder="Bracket"></label>
+        <label>Revision <input id="revision" placeholder="C"></label>
+        <label>Serial <input id="serial" placeholder="SN-001"></label>
+      </div>
+    </details>
 
     <p class="selection-help">Ctrl/Cmd-click to select multiple balloons, or drag a rectangle from empty drawing space. Escape clears the selection.</p>
 
